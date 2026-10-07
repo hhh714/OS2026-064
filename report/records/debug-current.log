@@ -1,0 +1,59 @@
+The target architecture is set to "riscv:rv64".
+0x0000000000001000 in ?? ()
+=== Reset vector ===
+pc             0x1000	0x1000
+=> 0x1000:	auipc	t0,0x0
+   0x1004:	addi	a1,t0,32
+   0x1008:	csrr	a0,mhartid
+   0x100c:	ld	t0,24(t0)
+   0x1010:	jr	t0
+   0x1014:	unimp
+   0x1016:	unimp
+   0x1018:	unimp
+   0x101a:	.insn	2, 0x8000
+   0x101c:	unimp
+=== Kernel already loaded before guest execution ===
+   0x80200000 <kern_entry>:	auipc	sp,0x3
+   0x80200004 <kern_entry+4>:	mv	sp,sp
+   0x80200008 <kern_entry+8>:	j	0x8020000a <kern_init>
+   0x8020000a <kern_init>:	auipc	a0,0x3
+0x0000000000001004 in ?? ()
+0x0000000000001008 in ?? ()
+0x000000000000100c in ?? ()
+0x0000000000001010 in ?? ()
+=== Before reset ROM jump ===
+pc             0x1010	0x1010
+t0             0x80000000	2147483648
+a0             0x0	0
+a1             0x1020	4128
+0x0000000080000000 in ?? ()
+=== Firmware entry ===
+pc             0x80000000	0x80000000
+=> 0x80000000:	csrr	a6,mhartid
+   0x80000004:	bgtz	a6,0x80000108
+   0x80000008:	auipc	t0,0x0
+   0x8000000c:	addi	t0,t0,1032
+   0x80000010:	auipc	t1,0x0
+Breakpoint 1 at 0x80200000: file kern/init/entry.S, line 7.
+
+Breakpoint 1, kern_entry () at kern/init/entry.S:7
+7	    la sp, bootstacktop
+=== Kernel entry ===
+pc             0x80200000	0x80200000 <kern_entry>
+sp             0x8001bd80	0x8001bd80
+ra             0x80000a02	0x80000a02
+=> 0x80200000 <kern_entry>:	auipc	sp,0x3
+   0x80200004 <kern_entry+4>:	mv	sp,sp
+   0x80200008 <kern_entry+8>:	j	0x8020000a <kern_init>
+   0x8020000a <kern_init>:	auipc	a0,0x3
+   0x8020000e <kern_init+4>:	addi	a0,a0,-2
+Breakpoint 2 at 0x8020000a: file kern/init/init.c, line 8.
+
+Breakpoint 2, kern_init () at kern/init/init.c:8
+8	    memset(edata, 0, end - edata);
+=== C entry and stack ===
+pc             0x8020000a	0x8020000a <kern_init>
+sp             0x80203000	0x80203000 <SBI_CONSOLE_PUTCHAR>
+ra             0x80000a02	0x80000a02
+$1 = 0x80203000
+[Inferior 1 (process 1) detached]
