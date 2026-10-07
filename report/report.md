@@ -75,7 +75,7 @@
 
 标准提示词包括 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]`。前者明确任务、操作和输出；RELY 提供与代码一致的最小可信上下文；GUARANTEE 列出接口；SPECIFICATION 对各接口说明 Pre-Condition 和 Post-Condition，必要时补充 Case 与 Requirements。规格应描述行为，而非机械抄录实现步骤。
 
-完整任务规格见 [prompt.md](prompt.md)，包括任务目标、可信上下文、接口清单与行为规格。
+完整任务提示词见 [prompt.md](prompt.md)，按整体任务、环境与构建、入口与初始化、SBI 输出、GDB 验证、报告整理六项组织；每项包括任务目标、可信上下文、接口清单与行为规格。条目编号表示功能划分，不代表调用或迭代次数。
 
 ### 功能模块：最小内核启动与调试
 
