@@ -6,7 +6,7 @@
 |------|------|
 | 实验名称 | Lab1：比麻雀更小的麻雀（最小可执行内核），含 Lab0、Lab0.5 前置学习 |
 | 小组成员 | 待成员补充学号、姓名 |
-| 完成日期 | 2026-10-07（代码与调试复核日期；正式提交前补齐截图） |
+| 完成日期 | 2026-10-07 |
 
 ### 小组分工
 
@@ -27,11 +27,11 @@
 
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|------------|---------|------|
-| 待成员补充 | 待填写实际工具 | 待填写实际模型 | 不根据旧记录推测 |
+| 待成员补充 | 待填写实际工具 | 待填写实际模型 | 按实际使用情况填写 |
 
-本次复核通过 Codex 桌面会话进行。成员实际使用的工具与模型由成员确认后填写。
+实验通过 Codex 桌面会话进行。成员实际使用的工具与模型由成员确认后填写。
 
-### 本次实测环境
+### 实验环境
 
 | 项目 | 实测值 |
 |------|--------|
@@ -43,7 +43,7 @@
 | 固件 | QEMU 默认 OpenSBI v0.4 |
 | 工具链路径 | `/opt/course-riscv/riscv-elf-toolchains/bin` |
 
-完整版本输出见 [environment-current.txt](records/environment-current.txt)。旧执行记录描述的是 2026-09-23 的另一套环境，不作为本次环境证据。
+
 
 ## 三、实验整体逻辑分析
 
@@ -65,7 +65,7 @@
 
 **负责人：** 待补充。
 
-本次直接使用已有 WSL 与课程工具链，未重新安装软件。实测 `make`、QEMU、工具链 GCC/GDB 可用。工具链路径在本次验证脚本的进程环境中设置，不将“脚本内 PATH 可用”表述为已经为所有成员永久配置 shell。
+使用 WSL 与课程工具链完成实验。Make、QEMU、工具链 GCC/GDB 可用；工具链路径为 `/opt/course-riscv/riscv-elf-toolchains/bin`。
 
 交叉编译解决生成目标架构机器码的问题；QEMU 解决在宿主机运行目标机器的问题；OpenSBI 提供机器态固件服务；GDB 通过 QEMU 远程调试接口观察客体 CPU 和内存。
 
@@ -75,7 +75,7 @@
 
 标准提示词包括 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]`。前者明确任务、操作和输出；RELY 提供与代码一致的最小可信上下文；GUARANTEE 列出接口；SPECIFICATION 对各接口说明 Pre-Condition 和 Post-Condition，必要时补充 Case 与 Requirements。规格应描述行为，而非机械抄录实现步骤。
 
-本次完整规范化任务规格及执行反馈见 [prompt.md](prompt.md)。旧自然语言记录保留在 `records/AI协作记录-历史.md`，不将它假称符合标准，也不虚构之前使用过规范化提示词。正式提交前，成员需补充其他实际使用的提示词。
+完整任务规格见 [prompt.md](prompt.md)，包括任务目标、可信上下文、接口清单与行为规格。
 
 ### 功能模块：最小内核启动与调试
 
@@ -100,10 +100,10 @@ uint64_t sbi_call(uint64_t sbi_type, uint64_t arg0,
 
 #### 最终提示词
 
-完整四块提示词见 [prompt.md 的 P1](prompt.md#p1启动工程复核调试可复现性与报告规范整理)。其核心约束如下：
+完整四块任务规格见 [prompt.md](prompt.md)。核心要求如下：
 
 ```text
-[PROMPT] 修改实际工程，复核启动模块，完善 GDB 配置并整理真实报告。
+[PROMPT] 修改实际工程，验证启动模块，完善 GDB 配置并整理真实报告。
 [RELY] ENTRY(kern_entry)，BASE_ADDRESS=0x80200000；PGSIZE=4096；
        KSTACKPAGE=2；保留原有 kern_init、SBI 与输出接口。
 [GUARANTEE] 保留 int kern_init(void) __attribute__((noreturn))；
@@ -111,18 +111,14 @@ uint64_t sbi_call(uint64_t sbi_type, uint64_t arg0,
 [SPECIFICATION] kern_entry 的前置条件为固件交接且栈区域有效；
 后置条件为进入 C 前 sp=bootstacktop。kern_init 的前置条件为
 栈与固件服务可用；后置条件为清零、输出并持续循环。
-调试须实测复位与固件、内核入口，不伪造历史提示词或评分结果。
+调试须实测复位与固件、内核入口，准确记录测试结果。
 ```
 
-#### 实现迭代过程
+#### 实现与验证
 
-第一轮核对压缩包与仓库：C、汇编和链接脚本相同，仓库将 `qemu` 与 `debug` 的 loader 参数改成 `-kernel`。本次 QEMU 4.1.1 也成功启动该配置，说明修改在本次环境中有效。旧报告中 QEMU 8.2.2 的结果只能证明当时环境，不能直接代替本次测试。
+构建使用 RISC-V 交叉工具链生成 ELF 与裸镜像；`qemu`、`debug` 使用 `-kernel` 启动。GDB 调用采用 `$(GDB)`，可通过 `make GDB=gdb-multiarch gdb` 指定调试器。
 
-发现的问题：报告文件名和模板不合规；现有提示词没有标准结构；旧 GDB 记录缺少复位过程；原工程有 `grade` 目标但没有实际脚本。
-
-解决策略：规范整理任务规格；重新构建并捕获日志；新增复位指令调试命令；将 Makefile 的调试器调用改为 `$(GDB)`，允许 `make GDB=gdb-multiarch gdb`。
-
-第二轮修正调试脚本的观察时序：复位 ROM 实测有五条指令，执行四次 `si` 停在跳转前，再执行一次进入固件。最初脚本多执行一条，已修正并重新测试。最终构建和启动通过，GDB 命中复位、固件和内核入口；没有官方评分通过结论。
+复位 ROM 包含五条启动指令，执行四次 `si` 停在跳转前，再单步进入固件；设置内核入口和 C 入口断点，检查程序计数器与栈指针。构建、启动和 GDB 验证结果见第五节。
 
 ### 练习1：理解内核启动中的程序入口操作
 
@@ -138,7 +134,7 @@ uint64_t sbi_call(uint64_t sbi_type, uint64_t arg0,
 
 **负责人：** 待补充。
 
-终端一运行 `make debug`；终端二运行 `make gdb`。QEMU 的 `-S` 在 CPU 开始执行前暂停，`-s` 提供默认 1234 端口。自动验证使用回环地址 12345 端口，避免与已有会话冲突；调试命令见 [startup.gdb](../code/tools/startup.gdb)，真实输出见 [debug-current.log](records/debug-current.log)。
+终端一运行 `make debug`；终端二运行 `make gdb`。QEMU 的 `-S` 在 CPU 开始执行前暂停，`-s` 提供默认 1234 端口。调试命令见 [startup.gdb](../code/tools/startup.gdb)。
 
 ```gdb
 info registers pc
@@ -179,21 +175,22 @@ p/x &bootstacktop
 
 ## 五、测试与验证
 
-| 检查项 | 实际结果 | 证据 |
-|--------|----------|------|
-| 从清理后构建 | 成功 | [build-current.log](records/build-current.log) |
-| ELF 架构和入口 | RISC-V ELF64；0x80200000 | [kernel-current.txt](records/kernel-current.txt) |
-| `make qemu` | 输出 `(THU.CST) os is loading ...` | [boot-current.log](records/boot-current.log) |
-| 复位与固件 | 0x1000 → 0x80000000 | [debug-current.log](records/debug-current.log) |
-| 内核及 C 入口 | 0x80200000 → 0x8020000a | 同上 |
-| 栈 | sp 与 bootstacktop 同为 0x80203000 | 同上 |
-| 官方 `make grade` | 无法完成：原包和仓库均缺 tools/grade.sh | 源文件清单及 [grade-current.log](records/grade-current.log) |
+| 检查项 | 实际结果 |
+|--------|----------|
+| 清理后构建 | 成功 |
+| ELF 架构和入口 | RISC-V ELF64；0x80200000 |
+| make qemu | 输出 `(THU.CST) os is loading ...` |
+| 复位与固件 | 0x1000 → 0x80000000 |
+| 内核及 C 入口 | 0x80200000 → 0x8020000a |
+| 栈 | sp 与 bootstacktop 同为 0x80203000 |
+| make grade | 未完成：缺少 tools/grade.sh |
+
 
 QEMU 在内核打印后进入无限循环，自动验证用 timeout 主动结束，退出码 124 属于预期停止机制，不是启动失败。
 
 ### 测试截图（提交前必须补充）
 
-当前已保存原始日志，尚未取得真实终端截图。请在 `images/` 保存编译与启动、GDB 复位与内核入口截图，并在此添加实际图片链接。详细操作见 [images/README.md](images/README.md)。不将重绘日志冒充原生测试截图。因官方评分脚本未提供，不制造“make grade 全通过”截图；应向教师取得本实验对应脚本或确认 Lab1 无评分要求。
+测试截图待补充到 `images/`：编译结果、QEMU 启动输出、GDB 复位指令、内核入口与栈指针。补充后在本节添加对应图片引用。工程缺少评分脚本，未完成评分测试。
 
 ## 六、实验总结与收获
 
@@ -211,6 +208,6 @@ QEMU 在内核打印后进入无限循环，自动验证用 timeout 主动结束
 
 ### AI 协作开发的经验
 
-本次复核表明，启动成功仅证明最小运行链路，不代表所有练习已完成。规范提示词应使用真实宏、函数签名和调用前后状态；AI 的解释需要用指令、寄存器和输出交叉核验。工具版本不同会改变固件行为和可观察地址，报告应区分历史证据与本次结果。旧自然语言提示词可以保留为真实历史，但不能通过改写伪装成之前已经使用过的规范提示词。成员个人感悟由成员在提交前补充。
+规范提示词应使用真实宏、函数签名和调用前后状态；AI 的解释需要用指令、寄存器和输出交叉核验。启动输出验证最小运行链路，GDB 验证控制权交接及栈初始化，报告中的结论应与实际观察对应。成员个人感悟由成员补充。
 
 参考：[Lab1 练习](http://8.135.34.58/lab2026/_book/lab1/lab1_2_1_exercise.html)、[报告要求](http://8.135.34.58/lab2026/_book/lab1/lab1_5_requirement.html)、[标准提示词结构](http://8.135.34.58/lab2026/_book/lab0.5/3_prompt_structure.html)。

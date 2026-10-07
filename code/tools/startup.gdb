@@ -1,7 +1,7 @@
 set pagination off
 set confirm off
 set architecture riscv:rv64
-target remote 127.0.0.1:12345
+target remote 127.0.0.1:1234
 echo === Reset vector ===\n
 info registers pc
 x/10i 0x1000
