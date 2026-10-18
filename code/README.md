@@ -1,16 +1,15 @@
-# Lab1：RISC-V 最小内核启动
+# Lab2：物理内存与页表
 
-在 Linux 或 WSL 中配置 RISC-V 工具链、Make 和 QEMU，运行：
+本目录包含 Sv39 启动映射、设备树内存解析、物理页初始化与最佳适配分配器。
 
 ```bash
 make
 make qemu
+make grade
 ```
 
-成功时输出 `(THU.CST) os is loading ...`，随后内核进入无限循环。退出 QEMU：按 Ctrl+A，松开后按 X。
+已在 WSL Ubuntu 环境中验证启动和分配器检查，配套评分结果为 20/20。
 
-验证环境：WSL2、Ubuntu 24.04.5、GCC 15.1.0、QEMU 4.1.1。实验说明见 [report.md](../report/report.md)。
+调试内核运行 `make debug`，另一个终端运行 `make gdb`。观察 QEMU 内部 MMU 需额外使用带调试信息的 QEMU 和宿主 GDB。
 
-调试时，终端一运行 `make debug`；终端二运行 `make gdb`。使用多架构调试器时运行 `make GDB=gdb-multiarch gdb`。连接端口为 1234，完整调试命令见 `tools/startup.gdb`。
-
-已验证编译、启动输出和 GDB 启动流程。工程缺少 `tools/grade.sh`，`make grade` 无法执行评分。
+目录中的 tools/startup.gdb 是保留的 Lab1 调试脚本，不适用于本实验的高地址入口；Lab2 调试流程需另行整理。
