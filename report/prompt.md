@@ -1,209 +1,205 @@
-# Lab1 提示词汇总
+# Lab2 提示词
 
-本文按独立功能组织任务提示词，供逐项分析、实现和验证使用；条目编号表示任务顺序，不表示实际调用次数或迭代次数。
+本文按两个可独立实现和验证的功能模块组织四段式任务提示词：物理内存初始化、最佳适配连续物理页分配。内容依据本次工程整理
 
-## P1：最小内核启动与调试整体任务
+## 提示词一：物理内存初始化模块
 
-```text
-[PROMPT]
-任务：检查 code/ 下最小内核启动模块，完善 Makefile 的调试器可配置性；补充真实复位流程验证与 report/report.md、report/prompt.md。
-操作要求：修改实际文件。先检查现有工程和工具版本，再编译、运行、调试。依据实际输出修订报告。
-输出要求：保留内核行为和公开接口；报告按模板组织，测试结果根据实际观察填写。
+### [PROMPT]
 
-[RELY]
-真实代码：ENTRY(kern_entry)，BASE_ADDRESS=0x80200000。
-entry.S：la sp, bootstacktop；tail kern_init。
-memlayout.h：KSTACKPAGE=2；KSTACKSIZE=(KSTACKPAGE*PGSIZE)。
-mmu.h：PGSHIFT=12；PGSIZE=4096。
-init.c：extern char edata[], end[]；memset(edata,0,end-edata)；cprintf 后无限循环。
-可用接口：void *memset(void *s, char c, size_t n)；int cprintf(const char *fmt, ...)。
-Makefile 已有 qemu/debug，使用 -bios default -kernel $(UCOREIMG)。
-工程缺少 tools/grade.sh，不能完成评分。
+**任务详情：** 阅读当前Lab2工程，在 `kern/mm/pmm.c` 指定位置实现物理内存初始化模块。根据设备树提供的RAM范围建立物理页描述符数组，保护已占用区域，将剩余完整物理页注册到物理内存管理器。完整考虑RAM边界、内核边界、描述符数组、设备树占用及虚实地址关系，不能直接将end之后全部内存视为空闲。
 
-[GUARANTEE]
-必须保留的接口：int kern_init(void) __attribute__((noreturn))；汇编入口 kern_entry。
-需修改的构建接口：make gdb 支持 GDB 变量覆盖，默认使用工具链 GDB。
-交付接口：make、make qemu、make debug、make gdb；report.md 和 prompt.md。
-本任务以验证已有模块为主，不要求新增内核函数；可新增独立调试命令文件，不更改公开 C 接口。
+**操作约束：**
 
-[SPECIFICATION]
-kern_entry
-Pre-Condition：固件已将控制权交给内核入口，启动栈区域有效。
-Post-Condition：进入 kern_init 前，sp 等于 bootstacktop；尾跳转不生成返回到入口的新返回地址。
+- 修改实际文件，仅允许在 `kern/mm/pmm.c` 指定位置补充实现及本文件内部static辅助函数。
+- 保留 `pmm_init` 调用顺序、公共接口、数据结构、宏、页大小及地址布局。
+- 不修改设备树解析、启动汇编、链接脚本和测试。
+- 不调用依赖当前分配器的动态内存分配，避免初始化循环依赖。
+- 保留高地址直接映射和按物理页管理的工程语义。
+- 将指定YOUR CODE归属标记替换为实际负责人学号；未提供时不推测。
 
-kern_init
-Pre-Condition：栈已初始化，链接符号和 SBI 控制台可用。
-Post-Condition：未初始化静态存储区域清零，输出启动信息，持续停留在内核循环。
-Requirements：不能将主动结束 QEMU 解释为内核崩溃。
+**输出与验证要求：** 说明修改位置、结果与适用范围；验证内存范围有效、页号语义一致、描述符页对齐且位于内核后、内核及描述符和DTB页不可分配、空闲集合正确、地址转换往返一致。测试不能被修改以取得通过结果，未运行项明确说明。
 
-gdb 目标与调试验证
-Pre-Condition：存在带符号 ELF 和等待连接的 QEMU。
-Post-Condition：使用指定调试器加载 ELF 并连接；实测复位 PC、ROM 指令、固件入口、内核入口与栈顶。
-Case 1：存在工具链 GDB，默认命令可执行。
-Case 2：使用多架构调试器，可通过 make GDB=gdb-multiarch gdb 覆盖。
-Requirements：地址和指令必须来自实际反汇编；说明 QEMU 预加载镜像与固件交接的区别。
+### [RELY]
 
-报告与证据
-Pre-Condition：已取得模板、指导书和真实测试日志。
-Post-Condition：按模板六个部分回答全部练习，准确记录测试结果；保留待补成员信息。
-Case 1：工程缺评分脚本，说明 make grade 无法执行官方评分，不能自行伪造官方通过结果。
-Case 2：无法获得原生终端截图，标记待补，不能将重绘日志冒充截图。
+- `PGSIZE=4096`，`PGSHIFT=12`；RAM起点为 `DRAM_BASE`，直接映射偏移为 `PHYSICAL_MEMORY_OFFSET`。
+- 启动映射覆盖从DRAM_BASE开始的1 GiB物理区域。
+- 链接符号 `extern char end[]` 表示内核静态布局结束的虚拟地址。
+- DTB头部采用大端格式，字节4～7记录总字节长度。
+
+```c
+uint64_t get_memory_base(void);
+uint64_t get_memory_size(void);
+extern uint64_t boot_dtb;
+
+struct Page {
+    int ref;
+    uint64_t flags;
+    unsigned int property;
+    list_entry_t page_link;
+};
+
+struct Page *pages;
+size_t npage;
+const size_t nbase; /* DRAM_BASE / PGSIZE */
+uint64_t va_pa_offset;
+
+static void init_memmap(struct Page *base, size_t n);
+size_t nr_free_pages(void);
 ```
 
-## P2：Lab0 环境检查与交叉编译
+可用接口：`SetPageReserved`、`set_page_ref`、`PPN`、`ROUNDUP`、`ROUNDDOWN`、`PADDR`、`pa2page`、`page2pa`。npage表示物理内存结束位置的页号上界，描述符数量与npage-nbase对应。实现前核对实际头文件，不另造名称。
 
-```text
-[PROMPT]
-任务：检查 Lab1 所需 Linux/WSL、RISC-V 工具链、Make、QEMU 和 GDB，分析 code/Makefile 的构建链路。
-操作要求：读取实际配置，执行工具版本查询和工程构建；需要调整构建配置时修改实际文件。
-输出要求：列出宿主架构、目标架构、工具版本和构建产物，解释编译、链接和镜像转换的作用。
+### [GUARANTEE]
 
-[RELY]
-GCCPREFIX=riscv64-unknown-elf-；CC=$(GCCPREFIX)gcc；LD=$(GCCPREFIX)ld。
-OBJCOPY=$(GCCPREFIX)objcopy；工具链目录为 /opt/course-riscv/riscv-elf-toolchains/bin。
-链接脚本 code/tools/kernel.ld：OUTPUT_ARCH(riscv)，ENTRY(kern_entry)，BASE_ADDRESS=0x80200000。
-构建产物：bin/kernel、bin/ucore.img；QEMU 平台为 virt。
-
-[GUARANTEE]
-构建接口：make、make qemu。
-本任务不新增 C 函数；保留链接入口和产物路径。
-
-[SPECIFICATION]
-## 环境检查
-Pre-Condition：已能访问工程与 Linux/WSL 环境。
-Post-Condition：明确每个必需工具是否可执行，记录可用工具的版本。
-Case 1：工具可用，使用已配置的工具完成构建。
-Case 2：工具缺失，报告具体缺失项及其影响，不声称环境准备完成。
-
-## 构建
-Pre-Condition：交叉编译器、链接器、二进制工具和 Make 可用。
-Post-Condition：生成 RISC-V ELF64 内核及裸镜像，ELF 入口为 0x80200000。
-Requirements：区分宿主机运行的编译器与生成代码的目标架构；ELF 用于符号调试，裸镜像用于启动。
+```c
+static void page_init(void);
 ```
 
-## P3：汇编入口、启动栈与 C 初始化
+正确建立 `pages`、`npage`、`va_pa_offset`，通过现有 `init_memmap` 注册可用页。允许增加static辅助函数，不更改公共接口。
 
-```text
-[PROMPT]
-任务：分析 code/kern/init/entry.S、init.c 和 tools/kernel.ld，完成练习1并验证最小内核初始化行为。
-操作要求：读取实际文件与反汇编；发现行为不符合规格时，在对应实际文件中修正。
-输出要求：解释 la sp, bootstacktop 与 tail kern_init 的行为、目的和实际展开形式。
+### [SPECIFICATION]
 
-[RELY]
-entry.S：kern_entry 中执行 la sp, bootstacktop 和 tail kern_init。
-启动栈在 .data 中分配；PGSIZE=4096，KSTACKPAGE=2，KSTACKSIZE=8192。
-链接入口为 0x80200000；edata 与 end 由链接脚本提供。
-可用函数：void *memset(void *s, char c, size_t n)；int cprintf(const char *fmt, ...)。
+#### page_init
 
-[GUARANTEE]
-汇编接口：kern_entry、bootstack、bootstacktop。
-C 接口：int kern_init(void) __attribute__((noreturn))。
-不改变入口名称、栈大小或公开接口；必要的辅助函数应为 static。
+**Pre-Condition：** 已进入具有直接映射的C初始化阶段；管理器已选定并初始化；dtb_init已执行；链接符号、DTB地址和转换定义有效。
 
-[SPECIFICATION]
-## kern_entry
-Pre-Condition：控制权到达内核入口，启动栈区域有效且符合对齐要求。
-Post-Condition：进入 C 初始化前，sp 指向 bootstacktop；执行流转入 kern_init。
-Requirements：解释尾调用不会为入口建立新的返回地址；不得假设伪指令必然只对应一条机器指令。
+**Post-Condition：**
 
-## kern_init
-Pre-Condition：栈已经建立，edata/end 合法，SBI 输出可用。
-Post-Condition：清零指定的静态未初始化存储区，输出启动文字，持续循环而不返回。
-Case 1：清零区间非空，对整个区间进行清零。
-Case 2：清零区间为空，不写入区间外内存，继续完成输出。
-Requirements：启动栈不得被初始化清零覆盖；以调试器检查 sp 和 bootstacktop 的一致性。
+- va_pa_offset等于直接映射偏移，npage表示RAM完整页范围的页号上界。
+- pages位于内核end之后并页对齐，数组覆盖需要描述的完整物理页。
+- 固件前置保留区、内核、描述符和RAM内DTB覆盖页不进入空闲集合。
+- 其余可用完整页通过init_memmap注册，区域互不重叠，不注册空区间或不完整页。
+
+**Case 1：布局有效。** 完成描述符和空闲区初始化，使后续分配释放可用。
+
+**Case 2：信息无效或不支持。** 对零长度、起点不符、范围溢出、超出启动映射、描述符空间不足或无可用页，通过断言或内核错误机制停止，不注册无效范围。
+
+**Case 3：DTB与候选空闲区重叠。** 排除DTB覆盖的完整页，仅注册前后非空可用区间。
+
+**Case 4：DTB不重叠。** 注册完整候选空闲区间。
+
+**Requirements：** 采用明确的左闭右开边界；区分虚拟地址、物理地址、页号和描述符下标；检查容量和算术边界；不覆盖内核及DTB。说明实现针对当前单段RAM实验布局，不声称支持全部设备树保留规则。
+
+## 提示词二：最佳适配连续物理页分配模块
+
+### [PROMPT]
+
+**任务详情：** 在 `kern/mm/best_fit_pmm.c` 指定位置实现完整最佳适配模块，包含初始化、初始空闲区注册、连续页申请、释放合并和计数查询。申请时从所有足够大的块中选择最小块；同大小选择较低地址，兼容现有管理器接口及检查函数。
+
+**操作约束：**
+
+- 修改实际文件，仅补充指定实现位置；允许模块内部static辅助函数与管理状态。
+- 允许在 `kern/mm/pmm.c` 管理器选择处启用best_fit_pmm_manager。
+- 不修改basic_check、best_fit_check、评分测试、数据结构、宏或接口签名。
+- 不硬编码测试地址、不伪造PASS、不跳过断言。
+- 不修改启动映射、设备树解析及其他分配器。
+- 指定归属标记填写实际负责人学号，未提供时不推测。
+
+**输出与验证要求：** 解释链表不变量、选择规则、分裂合并；验证地址有序且区间不重叠、块头长度正确、总计数一致、失败不改变状态、精确匹配与分裂正确，以及释放时前后和双侧合并。运行现有检查及make grade，未执行项明确说明。
+
+### [RELY]
+
+```c
+struct Page {
+    int ref;
+    uint64_t flags;
+    unsigned int property;
+    list_entry_t page_link;
+};
+
+typedef struct {
+    list_entry_t free_list;
+    unsigned int nr_free;
+} free_area_t;
+
+struct pmm_manager {
+    const char *name;
+    void (*init)(void);
+    void (*init_memmap)(struct Page *base, size_t n);
+    struct Page *(*alloc_pages)(size_t n);
+    void (*free_pages)(struct Page *base, size_t n);
+    size_t (*nr_free_pages)(void);
+    void (*check)(void);
+};
 ```
 
-## P4：格式化输出与 SBI 服务链路
+页接口：`PageReserved`、`PageProperty`、`SetPageProperty`、`ClearPageProperty`、`set_page_ref`、`le2page`。
 
-```text
-[PROMPT]
-任务：分析 code/kern/libs/stdio.c、kern/driver/console.c、libs/printfmt.c 和 libs/sbi.c 的启动输出链路。
-操作要求：读取各函数实际实现，运行内核核对输出；仅在发现问题时修改对应文件。
-输出要求：说明格式化、逐字符输出、控制台封装和 ecall 的职责，并验证启动消息。
+循环双向链表接口：`list_init`、`list_empty`、`list_next`、`list_prev`、`list_add`（插在节点后）、`list_add_before`、`list_del`。
 
-[RELY]
-启动调用：cprintf("%s\n\n", message)。
-调用链：cprintf → vcprintf → vprintfmt → cputch → cons_putc → sbi_console_putchar → sbi_call。
-SBI_CONSOLE_PUTCHAR=1；sbi_call 使用 a7 传服务编号，a0–a2 传参数，通过 ecall 请求固件服务。
-此实验使用支持 legacy SBI 控制台输出的 OpenSBI。
+同一pages数组中相邻描述符对应相邻物理页；初始区域由page_init筛选且描述符为保留状态；检查函数直接使用free_list和nr_free，需提供兼容名称。申请返回描述符指针，不是业务内存指针。当前不要求多核并发同步。以实际头文件核对定义。
 
-[GUARANTEE]
-int cprintf(const char *fmt, ...)；int vcprintf(const char *fmt, va_list ap)；
-void cons_putc(int c)；void sbi_console_putchar(unsigned char ch)；
-uint64_t sbi_call(uint64_t sbi_type, uint64_t arg0, uint64_t arg1, uint64_t arg2)。
-保留现有接口；不扩展到用户态系统调用或输入驱动实现。
+### [GUARANTEE]
 
-[SPECIFICATION]
-## 格式化输出
-Pre-Condition：格式串及对应实参有效，控制台服务可用。
-Post-Condition：按格式逐字符输出，cprintf 返回格式化输出的字符数量。
-Requirements：变参访问遵循工程的 va_list 定义；字符计数与输出内容一致。
-
-## SBI 控制台输出
-Pre-Condition：固件支持相应服务，内核运行环境允许执行 ecall。
-Post-Condition：字符通过固件控制台出现在 QEMU 终端。
-Requirements：说明 S 模式内核请求 M 模式固件服务与用户态系统调用的区别；核对实际输出，不以代码阅读代替运行验证。
+```c
+static void best_fit_init(void);
+static void best_fit_init_memmap(struct Page *base, size_t n);
+static struct Page *best_fit_alloc_pages(size_t n);
+static void best_fit_free_pages(struct Page *base, size_t n);
+static size_t best_fit_nr_free_pages(void);
+const struct pmm_manager best_fit_pmm_manager;
 ```
 
-## P5：GDB 跟踪复位到内核的完整流程
+保留现有 `basic_check`、`best_fit_check`，管理器check成员连接best_fit_check。允许增加static辅助函数，不更改公开接口。
 
-```text
-[PROMPT]
-任务：完成 Lab1 练习2，使用 QEMU 与 GDB 跟踪复位 ROM、OpenSBI、kern_entry 和 kern_init。
-操作要求：执行实际调试，完善 code/tools/startup.gdb，记录指令与寄存器观察结果。
-输出要求：回答第一条指令地址、最初几条指令的功能、固件与内核交接地址，以及栈初始化结果。
+### [SPECIFICATION]
 
-[RELY]
-make debug 使用 -s -S；GDB 默认连接 localhost:1234。
-符号文件 bin/kernel；kern_entry=0x80200000；栈顶符号 bootstacktop。
-当前 QEMU 4.1.1 的 virt 平台复位地址为 0x1000，OpenSBI 入口为 0x80000000。
-可用命令：info registers、x/i、si、break、continue、p/x。
+#### best_fit_init
 
-[GUARANTEE]
-构建接口：make debug、make gdb；GDB 可通过变量 GDB 覆盖。
-命令文件：code/tools/startup.gdb；不新增内核 C 接口。
+**Pre-Condition：** 尚未注册物理页，不存在需保留的在用管理状态。
 
-[SPECIFICATION]
-## 复位与固件
-Pre-Condition：QEMU 在客体 CPU 执行前暂停，GDB 已连接。
-Post-Condition：观察复位 PC，反汇编启动指令，单步确认跳转到固件入口。
-Requirements：以当前平台的实际指令为准，不能用其他版本示例替代实测。
+**Post-Condition：** 空闲循环链表有效且为空，空闲计数为0。
 
-## 内核交接与栈
-Pre-Condition：固件已开始执行，内核入口断点已设置。
-Post-Condition：命中 kern_entry，再到达 kern_init，验证 sp=bootstacktop。
-Requirements：在复位暂停时检查内核地址内容，区分 QEMU 预加载与固件控制权交接；不把未观察到的内存写入描述成调试结论。
-```
+#### best_fit_init_memmap
 
-## P6：按模板整理实验报告与提交目录
+**Pre-Condition：** n>0；base描述合法连续n页；全部为保留页；区域可分配且与已注册区间不重叠。
 
-```text
-[PROMPT]
-任务：按报告模板完成 report/report.md，汇总提示词为 report/prompt.md，组织 report/images/ 中的测试截图。
-操作要求：直接编辑实际 Markdown 文件；按练习顺序组织解答，检查目录与图片链接。
-输出要求：报告包含基本信息、实验目的、环境、整体逻辑、内容与实现、测试、总结；Lab0 和 Lab0.5 合并为前置学习。
+**Post-Condition：** 清除区域保留状态，引用计数为0；首描述符为空闲块头且property=n；块头进入按地址递增的链表；空闲页总数增加n。
 
-[RELY]
-分支名称 lab1；顶层目录 code/、report/。
-report/ 仅包含 report.md、prompt.md、images/。
-成员学号、姓名、分工、各成员 AI 工具与模型由成员填写。
-已验证构建、启动文字、复位流程和栈；工程缺少 tools/grade.sh。
+**Case 1：链表为空。** 注册后含一个有效空闲块。
 
-[GUARANTEE]
-文档接口：report/report.md、report/prompt.md；截图接口：report/images/。
-本任务不修改内核函数；保留报告模板的主要章节。
+**Case 2：链表非空。** 插入正确地址位置，保留已有块和有效连接。
 
-[SPECIFICATION]
-## 实验报告
-Pre-Condition：已有指导书、模板和实际验证结果。
-Post-Condition：完整回答两项练习，解释核心函数与模块，列出实验知识点及未涉及的 OS 原理。
-Requirements：提示词按四块结构书写，测试结论与实际结果一致；不编造成员信息或未完成的评分。
+#### best_fit_alloc_pages
 
-## 截图与目录
-Pre-Condition：测试已执行，截图来自对应测试过程。
-Post-Condition：图片存入 images/，Markdown 用相对路径引用；report/ 无多余记录文件。
-Case 1：截图已经取得，检查文件存在、内容对应和链接正确。
-Case 2：截图尚未取得，报告明确待补，不能声称已完成截图交付。
-```
+**Pre-Condition：** n>0，零页申请触发断言；管理状态满足不变量。
 
+**Post-Condition：** 成功返回连续n页的首描述符，选择最小够用块，同大小选择较低地址；分配区域退出空闲集合，总数减少n，其他已分配区域不受影响。失败返回NULL，链表、描述符状态及计数不变。
+
+**Case 1：精确匹配。** 分配整块，不产生剩余块。
+
+**Case 2：最优块较大。** 从低地址端分配n页，剩余部分构成有效空闲块，链表仍有序。
+
+**Case 3：总空闲页不足。** 返回NULL，不修改状态。
+
+**Case 4：总数足够但连续块不足。** 返回NULL，不修改状态。
+
+**Requirements：** 不保证返回页数据已清零；PageProperty为0不能单独证明该页已分配；不要求按块大小排序，说明当前查找复杂度。
+
+#### best_fit_free_pages
+
+**Pre-Condition：** n>0，零页释放触发断言；base和n表示合法、连续、允许释放的页；调用者保证不再使用、不是保留页且未重复释放；管理状态有效。
+
+**Post-Condition：** 区域可重新分配、引用计数为0，总空闲页数恰好增加n；链表按地址有序且不重叠；与释放区直接相邻的空闲块合并，块头长度正确。合并不额外增加计数。
+
+**Case 1：两侧不相邻。** 新增独立空闲块。
+
+**Case 2：仅前侧相邻。** 合并后以前块为起点。
+
+**Case 3：仅后侧相邻。** 合并后以释放区为起点。
+
+**Case 4：两侧相邻。** 形成覆盖三段的单一连续块。
+
+**Requirements：** 不要求维护每次申请记录；支持释放合法持有的连续范围；不声称现有断言识别所有非法释放；不修改框架测试。
+
+#### best_fit_nr_free_pages
+
+**Pre-Condition：** 管理器已初始化，计数有效。
+
+**Post-Condition：** 返回空闲页总数，单位为页，不修改状态。
+
+#### best_fit_pmm_manager
+
+**Pre-Condition：** 实现签名符合框架。
+
+**Post-Condition：** 接口成员连接对应最佳适配实现，check连接既有检查函数，上层统一接口实际使用最佳适配策略。
