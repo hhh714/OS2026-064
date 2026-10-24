@@ -3,20 +3,32 @@
 #include <best_fit_pmm.h>
 #include <stdio.h>
 
+
+//实现最佳适配物理页分配器
+//申请n页时，从所有能满足请求的空闲块中，选择最小的块；释放时，将相邻空闲块合并。
+
 //lab2 function2-2 YOUR CODE
+
 static free_area_t free_area;
+//free_area包含两个成员：
+//free_list：空闲块组成的循环双向链表的头节点。
+//nr_free：所有空闲块的页数之和。
+//形如：链表头 ⇄ 空闲块A：3页 ⇄ 空闲块B：8页 ⇄ 链表头
+
 
 #define free_list (free_area.free_list)
 #define nr_free (free_area.nr_free)
 
 static void
 best_fit_init(void) {
-    list_init(&free_list);
-    nr_free = 0;
+    list_init(&free_list);//让链表头的前后指针指向自己，表示链表为空
+    nr_free = 0;//将空闲页数设置为0
 }
 
 static void
 best_fit_init_memmap(struct Page *base, size_t n) {
+    //把一段页注册为空闲块
+    //如：best_fit_init_memmap(&pages[100], 10);表示将第100～109个描述符对应的物理页注册为空闲区域，不是分配10字节
     assert(n > 0);
     struct Page *p = base;
     for (; p != base + n; p ++) {
@@ -24,22 +36,40 @@ best_fit_init_memmap(struct Page *base, size_t n) {
         p->flags = p->property = 0;
         set_page_ref(p, 0);
     }
+
+    /*逐项完成：
+    1. 确认这些页之前被标记为保留。
+    2. 清除标志，包括保留标志。
+    3. 清零原来的块长度信息。
+    4. 引用计数设为零。
+    */
+
     base->property = n;
+    //将第一页设置为空闲块头，并记录整个块的长度
+
     SetPageProperty(base);
+    //标记空闲块头
+
     nr_free += n;
     if (list_empty(&free_list)) {
         list_add(&free_list, &(base->page_link));
+        //链表为空，直接插入
+
     } else {
         list_entry_t* le = &free_list;
         while ((le = list_next(le)) != &free_list) {
             struct Page* page = le2page(le, page_link);
+            //le只是结构体中的链表节点指针，le2page根据成员偏移找到它所属的struct Page。
             if (base < page) {
                 list_add_before(le, &(base->page_link));
+                //遇到地址比新块大的块，就插到它前面。
                 break;
             } else if (list_next(le) == &free_list) {
                 list_add(le, &(base->page_link));
                 break;
             }
+            //保持地址有序，方便后续检查前后的空闲块是否在物理上相邻，能否合并
+            //最终保持：低地址空闲块 → 高地址空闲块
         }
     }
 }
@@ -51,6 +81,8 @@ best_fit_alloc_pages(size_t n) {
         return NULL;
     }
     struct Page *page = NULL;
+    //page保存目前找到的最佳候选，最初没有候选
+
     list_entry_t *le = &free_list;
     while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
@@ -65,12 +97,15 @@ best_fit_alloc_pages(size_t n) {
     if (page != NULL) {
         list_entry_t* prev = list_prev(&(page->page_link));
         list_del(&(page->page_link));
+        //找到候选后，先记住候选前面的节点，再把整个候选空闲块从链表摘下。
+
         if (page->property > n) {
             struct Page *p = page + n;
             p->property = page->property - n;
             SetPageProperty(p);
             list_add(prev, &(p->page_link));
         }
+        //把剩余快放回原位，继续保持链表地址有序
         nr_free -= n;
         ClearPageProperty(page);
     }
@@ -79,6 +114,7 @@ best_fit_alloc_pages(size_t n) {
 
 static void
 best_fit_free_pages(struct Page *base, size_t n) {
+    //释放物理页
     assert(n > 0);
     struct Page *p = base;
     for (; p != base + n; p ++) {
@@ -86,8 +122,15 @@ best_fit_free_pages(struct Page *base, size_t n) {
         p->flags = 0;
         set_page_ref(p, 0);
     }
+    /*检查：
+    - 不是不能释放的保留页。
+    - 不是现有空闲块头。
+    */
+
     base->property = n;
     SetPageProperty(base);
+    //将 base 对应的页描述符标记为“空闲块的第一页”，也就是空闲块头。
+
     nr_free += n;
 
     if (list_empty(&free_list)) {
@@ -107,9 +150,14 @@ best_fit_free_pages(struct Page *base, size_t n) {
     }
 
     list_entry_t* le = list_prev(&(base->page_link));
+    //找到前一个链表节点
+
     if (le != &free_list) {
+        //排除头节点，因为头节点不是实际空闲块
+
         p = le2page(le, page_link);
         if (p + p->property == base) {
+            //判断前块起点 + 前块页数 = 新释放块起点，如果相等，物理上相邻，可以合并
             p->property += base->property;
             ClearPageProperty(base);
             list_del(&(base->page_link));
@@ -128,6 +176,7 @@ best_fit_free_pages(struct Page *base, size_t n) {
     }
 }
 
+
 static size_t
 best_fit_nr_free_pages(void) {
     return nr_free;
@@ -136,6 +185,7 @@ best_fit_nr_free_pages(void) {
 
 static void best_fit_check(void);
 const struct pmm_manager best_fit_pmm_manager = {
+    //管理器结构体：把函数接到统一接口上，提前声明检查函数
     .name = "best_fit_pmm_manager",
     .init = best_fit_init,
     .init_memmap = best_fit_init_memmap,

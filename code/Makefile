@@ -34,6 +34,20 @@ CFLAGS  := -mcmodel=medany -std=gnu99 -Wno-unused -Werror
 CFLAGS	+= -fno-builtin -Wall -O2 -nostdinc $(DEFS)
 CFLAGS	+= -fno-stack-protector -ffunction-sections -fdata-sections
 CFLAGS	+= -g
+# Select with `make clean` followed by `make PMM=buddy`; grading keeps best_fit.
+PMM ?= best_fit
+ifeq ($(PMM),buddy)
+CFLAGS += -DPMM_USE_BUDDY
+else ifneq ($(PMM),best_fit)
+$(error unsupported PMM: choose best_fit or buddy)
+endif
+# Optional small-object allocator self-test; independent of PMM selection.
+SLUB ?= 0
+ifeq ($(SLUB),1)
+CFLAGS += -DENABLE_SLUB
+else ifneq ($(SLUB),0)
+$(error unsupported SLUB: choose 0 or 1)
+endif
 CFLAGS2 = $(CFLAGS) -D ucore_test
 CTYPE	:= c S
 LD      := $(GCCPREFIX)ld

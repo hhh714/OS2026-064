@@ -1,5 +1,6 @@
 #include <default_pmm.h>
 #include <best_fit_pmm.h>
+#include <buddy_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <memlayout.h>
@@ -34,7 +35,11 @@ static void check_alloc_page(void);
 
 // init_pmm_manager - initialize a pmm_manager instance
 static void init_pmm_manager(void) {
+#ifdef PMM_USE_BUDDY
+    pmm_manager = &buddy_pmm_manager;
+#else
     pmm_manager = &best_fit_pmm_manager;
+#endif
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -95,10 +100,12 @@ static void page_init(void) {
         uintptr_t dtb_start = ROUNDDOWN(boot_dtb, PGSIZE);
         uintptr_t dtb_end = ROUNDUP(boot_dtb + total, PGSIZE);
         if (dtb_start < free_end && dtb_end > free_start) {
-            if (free_start < dtb_start)
-                init_memmap(pa2page(free_start), (dtb_start - free_start) / PGSIZE);
-            if (dtb_end < free_end)
-                init_memmap(pa2page(dtb_end), (free_end - dtb_end) / PGSIZE);
+            uintptr_t left_end = dtb_start < free_end ? dtb_start : free_end;
+            uintptr_t right_start = dtb_end > free_start ? dtb_end : free_start;
+            if (free_start < left_end)
+                init_memmap(pa2page(free_start), (left_end - free_start) / PGSIZE);
+            if (right_start < free_end)
+                init_memmap(pa2page(right_start), (free_end - right_start) / PGSIZE);
         } else {
             init_memmap(pa2page(free_start), (free_end - free_start) / PGSIZE);
         }
@@ -115,7 +122,7 @@ void pmm_init(void) {
     // So a framework of physical memory manager (struct pmm_manager)is defined in pmm.h
     // First we should init a physical memory manager(pmm) based on the framework.
     // Then pmm can alloc/free the physical memory.
-    // Now the first_fit/best_fit/worst_fit/buddy_system pmm are available.
+    // First Fit, Best Fit and Buddy are implemented; Best Fit is the default.
     init_pmm_manager();
 
     // detect physical memory space, reserve already used memory,
