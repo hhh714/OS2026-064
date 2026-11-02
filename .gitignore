@@ -1,0 +1,14 @@
+/obj/
+/bin/
+/code/obj/
+/code/bin/
+/code/.qemu*.out
+/code/.gdb.in
+/code/cscope*
+/code/tags
+/.qemu*.out
+/.gdb.in
+/cscope*
+/tags
+__pycache__/
+*.pyc

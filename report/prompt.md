@@ -1,209 +1,136 @@
-# Lab1 提示词汇总
+# Lab3 四段式 AI 提示词
 
-本文按独立功能组织任务提示词，供逐项分析、实现和验证使用；条目编号表示任务顺序，不表示实际调用次数或迭代次数。
+以下为依据本次实现整理的提示词，完整协作过程、实际错误和验证结果见 [实验报告](report.md)。所有源码路径均相对于仓库的 `code/` 目录。
 
-## P1：最小内核启动与调试整体任务
+## 三、Lab2 依赖承接提示词
 
-```text
-[PROMPT]
-任务：检查 code/ 下最小内核启动模块，完善 Makefile 的调试器可配置性；补充真实复位流程验证与 report/report.md、report/prompt.md。
-操作要求：修改实际文件。先检查现有工程和工具版本，再编译、运行、调试。依据实际输出修订报告。
-输出要求：保留内核行为和公开接口；报告按模板组织，测试结果根据实际观察填写。
+### P — Prompt：任务说明
 
-[RELY]
-真实代码：ENTRY(kern_entry)，BASE_ADDRESS=0x80200000。
-entry.S：la sp, bootstacktop；tail kern_init。
-memlayout.h：KSTACKPAGE=2；KSTACKSIZE=(KSTACKPAGE*PGSIZE)。
-mmu.h：PGSHIFT=12；PGSIZE=4096。
-init.c：extern char edata[], end[]；memset(edata,0,end-edata)；cprintf 后无限循环。
-可用接口：void *memset(void *s, char c, size_t n)；int cprintf(const char *fmt, ...)。
-Makefile 已有 qemu/debug，使用 -bios default -kernel $(UCOREIMG)。
-工程缺少 tools/grade.sh，不能完成评分。
+请为当前 Lab3 框架补齐启动所需的 Lab2 内存管理依赖。参考我们已经完成并测试的 Lab2 实现，在 `kern/mm/pmm.c` 的 Lab2 预留位置补齐物理页初始化，在 `kern/mm/best_fit_pmm.c` 的预留位置补齐 Best-Fit 模块，并使当前管理器选择 `best_fit_pmm_manager`。
 
-[GUARANTEE]
-必须保留的接口：int kern_init(void) __attribute__((noreturn))；汇编入口 kern_entry。
-需修改的构建接口：make gdb 支持 GDB 变量覆盖，默认使用工具链 GDB。
-交付接口：make、make qemu、make debug、make gdb；report.md 和 prompt.md。
-本任务以验证已有模块为主，不要求新增内核函数；可新增独立调试命令文件，不更改公开 C 接口。
+只迁移必要实现，不整文件覆盖 Lab3 版本；保留原有注释、测试和中断临界区保护。不引入 Buddy 或 SLUB。保留实验标签，在新增归属标记中填写 2414077。输出修改位置、地址换算依据和验证方法。
 
-[SPECIFICATION]
-kern_entry
-Pre-Condition：固件已将控制权交给内核入口，启动栈区域有效。
-Post-Condition：进入 kern_init 前，sp 等于 bootstacktop；尾跳转不生成返回到入口的新返回地址。
+### R — Rely：最小依赖
 
-kern_init
-Pre-Condition：栈已初始化，链接符号和 SBI 控制台可用。
-Post-Condition：未初始化静态存储区域清零，输出启动信息，持续停留在内核循环。
-Requirements：不能将主动结束 QEMU 解释为内核崩溃。
+- 已完成的 Lab2 `page_init()` 和 Best-Fit 实现。
+- 当前 Lab3 的 `pmm.c`、`pmm.h`、`memlayout.h`、页面状态及地址转换宏。
+- DTB 内存信息接口、链接符号 `end`、`struct Page` 和空闲链表定义。
+- 当前 Lab3 中 `alloc_pages()`、`free_pages()` 等函数的中断保护代码。
 
-gdb 目标与调试验证
-Pre-Condition：存在带符号 ELF 和等待连接的 QEMU。
-Post-Condition：使用指定调试器加载 ELF 并连接；实测复位 PC、ROM 指令、固件入口、内核入口与栈顶。
-Case 1：存在工具链 GDB，默认命令可执行。
-Case 2：使用多架构调试器，可通过 make GDB=gdb-multiarch gdb 覆盖。
-Requirements：地址和指令必须来自实际反汇编；说明 QEMU 预加载镜像与固件交接的区别。
+### G — Guarantee：接口清单
 
-报告与证据
-Pre-Condition：已取得模板、指导书和真实测试日志。
-Post-Condition：按模板六个部分回答全部练习，准确记录测试结果；保留待补成员信息。
-Case 1：工程缺评分脚本，说明 make grade 无法执行官方评分，不能自行伪造官方通过结果。
-Case 2：无法获得原生终端截图，标记待补，不能将重绘日志冒充截图。
+- `static void page_init(void)`。
+- `const struct pmm_manager best_fit_pmm_manager` 及其必需回调。
+- 保持 `pmm_init()`、`alloc_pages()`、`free_pages()` 和查询接口的对外约定。
+
+### S — Specification：行为规格
+
+1. DTB 提供有效物理内存范围时，初始化页描述符和相关全局变量，按完整物理页登记可分配区域。
+2. OpenSBI、内核镜像、页描述符数组及实际 DTB 占用范围不得被登记为空闲页；空区间不得传给 `init_memmap()`。
+3. 地址计算必须区分物理地址、虚拟地址、物理页号和描述符地址，检查范围及对齐；无效内存信息应停止初始化。
+4. Best-Fit 应选择满足请求的最小空闲连续块；回收后合并物理连续块并保持空闲计数一致。
+5. Lab3 原有分配和回收接口中的中断保护必须保留，不得因迁移 Lab2 实现而丢失。
+6. 验证内核可启动，管理器显示 Best-Fit，页面分配自检成功，并继续进入 Trap 初始化阶段。
+
+## 四、模块一提示词：Trap 上下文恢复与入口
+
+### P — Prompt：任务说明
+
+请实现 Lab3 的 Trap 上下文恢复与汇编入口模块，使系统能够完成“保存现场、进入 C 处理函数、恢复现场、返回原执行流”的闭环。
+
+修改 `kern/trap/trapentry.S` 中 `RESTORE_ALL` 以及 `__alltraps` 的 Lab3 预留位置，保留 `lab3` 标签，将对应 `YOUR CODE` 替换为 2414077。不得修改 `SAVE_ALL` 的保存顺序、`struct trapframe` 的布局和 `trap()` 的函数签名，不改测试、链接脚本或其他模块。
+
+请先依据现有保存逻辑确认现场布局，再给出实现。输出修改说明、恢复顺序的理由，以及如何验证通用寄存器、栈指针和返回位置恢复正确。若发现工具链兼容问题，应指出具体错误及最小兼容方案，不通过改变现场布局绕过问题。
+
+### R — Rely：最小依赖
+
+- `kern/trap/trapentry.S`：现有 `SAVE_ALL`、`RESTORE_ALL`、`__alltraps`、`__trapret`。
+- `kern/trap/trap.h`：`struct pushregs` 和 `struct trapframe`。
+- `libs/riscv.h`：`REGBYTES`、`LOAD`、`STORE` 和相关 CSR 定义。
+- C 接口 `void trap(struct trapframe *tf)`。
+- RV64 函数调用约定及 `sret` 的返回机制。
+
+### G — Guarantee：接口清单
+
+| 交付点 | 输入状态 | 对外结果 |
+| --- | --- | --- |
+| `RESTORE_ALL` | `sp` 指向现有布局的 TrapFrame | 恢复可写通用寄存器、`sstatus`、`sepc` 和原 `sp` |
+| `__alltraps` | 处理器跳至 Trap 入口 | 保存现场并把当前帧指针作为参数交给 `trap()` |
+| `__trapret` | C 处理函数返回，栈仍指向现场 | 恢复后执行框架中的 `sret` |
+
+### S — Specification：行为规格
+
+1. **布局一致性**：以现有 `SAVE_ALL` 和结构体为准。RV64 下 36 个槽各占 8 字节，共 288 字节；通用寄存器按编号对应槽位，槽 32～35 分别是状态、EPC、异常相关地址和原因。
+2. **栈指针恢复**：槽 2 保存的是 Trap 前的 `sp`。在其他恢复操作仍需要当前帧地址时，不得提前恢复它；完成其他必要加载后再恢复原 `sp`。
+3. **寄存器完整性**：恢复所有已保存的可写通用寄存器，包括被用作临时变量的寄存器；`x0` 固定为零，不需恢复。
+4. **控制状态**：恢复 `sstatus`，将帧内的 EPC 写回 `sepc`。允许 C 处理函数按异常语义修改 EPC；`scause` 和 `stval` 是诊断信息，不要求当作返回现场写回。
+5. **参数传递**：`trap()` 接收到的指针必须是当前保存帧的起始地址，按调用约定通过 `a0` 传递。C 函数返回后，恢复代码仍须能访问原帧。
+6. **返回闭环**：C 函数返回后进入统一恢复路径，由 `sret` 完成 Trap 返回，不能使用普通函数返回代替。
+7. **栈对齐**：在入口栈符合 ABI 对齐的前提下，分配现场后调用 C 函数仍保持 16 字节对齐。
+8. **验收**：用框架测试验证断点 Trap 能进入 C 函数，返回后寄存器与预设值一致、`sp` 恢复正确，并从更新后的 EPC 继续执行。不得删除断言或只打印通过信息。
+
+## 五、模块二提示词：中断与异常处理
+
+### P — Prompt：任务说明
+
+请实现 Lab3 的中断与异常处理模块，在统一 Trap 入口之后，根据原因完成分类处理，并与上下文恢复流程衔接。
+
+仅补全 `kern/trap/trap.c` 中指定的 `interrupt_handler()` 和 `exception_handler()`，以及该实现必需的局部支持定义。保留 `lab3` 标记并填写 2414077。不得修改 `trap()`、`trap_dispatch()`、TrapFrame、已有测试及规定输出，不改变时钟接口和 SBI 接口。
+
+请检查框架已有宏和函数再使用，避免假设不存在的接口。交付代码后说明时钟为何需要再次设置、异常 EPC 为何需要更新，以及各行为对应的测试方法。
+
+### R — Rely：最小依赖
+
+- `kern/trap/trap.c`、`trap.h`：分派逻辑、帧结构和打印函数。
+- `kern/driver/clock.c`、`clock.h`：`ticks`、`clock_set_next_event()`。
+- `libs/riscv.h`：中断原因和异常原因宏。
+- `libs/sbi.h`：框架提供的关机接口。
+- `TICK_NUM`、`print_ticks()`，以及框架若存在的 `SHUTDOWN_AFTER`。
+- 实验要求的输出格式和评分脚本；只读取，不能修改验收标准。
+
+### G — Guarantee：接口清单
+
+```c
+void interrupt_handler(struct trapframe *tf);
+void exception_handler(struct trapframe *tf);
 ```
 
-## P2：Lab0 环境检查与交叉编译
+可使用内部计数状态；保持上述签名。中断处理不返回业务值，异常处理通过更新 `tf->epc` 指定返回位置。
 
-```text
-[PROMPT]
-任务：检查 Lab1 所需 Linux/WSL、RISC-V 工具链、Make、QEMU 和 GDB，分析 code/Makefile 的构建链路。
-操作要求：读取实际配置，执行工具版本查询和工程构建；需要调整构建配置时修改实际文件。
-输出要求：列出宿主架构、目标架构、工具版本和构建产物，解释编译、链接和镜像转换的作用。
+### S — Specification：行为规格
 
-[RELY]
-GCCPREFIX=riscv64-unknown-elf-；CC=$(GCCPREFIX)gcc；LD=$(GCCPREFIX)ld。
-OBJCOPY=$(GCCPREFIX)objcopy；工具链目录为 /opt/course-riscv/riscv-elf-toolchains/bin。
-链接脚本 code/tools/kernel.ld：OUTPUT_ARCH(riscv)，ENTRY(kern_entry)，BASE_ADDRESS=0x80200000。
-构建产物：bin/kernel、bin/ucore.img；QEMU 平台为 virt。
+#### S1：原因分类
 
-[GUARANTEE]
-构建接口：make、make qemu。
-本任务不新增 C 函数；保留链接入口和产物路径。
+- 前置条件：`tf` 为入口构造的有效帧，框架已将中断与同步异常分派到对应函数。
+- 中断原因使用去除最高中断标志位后的编号，避免把标志位混入 `switch` 判断。
+- 识别框架列出的软件、时钟和外部中断；非实验核心类型输出对应提示。
+- 未识别中断输出原因编号，并调用 `print_trapframe(tf)`；其他未专门处理的异常也调用该函数。
 
-[SPECIFICATION]
-## 环境检查
-Pre-Condition：已能访问工程与 Linux/WSL 环境。
-Post-Condition：明确每个必需工具是否可执行，记录可用工具的版本。
-Case 1：工具可用，使用已配置的工具完成构建。
-Case 2：工具缺失，报告具体缺失项及其影响，不声称环境准备完成。
+#### S2：时钟中断
 
-## 构建
-Pre-Condition：交叉编译器、链接器、二进制工具和 Make 可用。
-Post-Condition：生成 RISC-V ELF64 内核及裸镜像，ELF 入口为 0x80200000。
-Requirements：区分宿主机运行的编译器与生成代码的目标架构；ELF 用于符号调试，裸镜像用于启动。
-```
+- 每收到一次 `IRQ_S_TIMER`，安排下一次时钟事件，并且只将 `ticks` 增加一次。
+- `ticks` 到达 `TICK_NUM` 的整数倍时，调用已有统计输出，普通配置每 100 次打印一次 `100 ticks`。
+- 累计统计输出达到 `SHUTDOWN_AFTER` 次后调用 `sbi_shutdown()`。
+- 检查实际框架：若未定义 `SHUTDOWN_AFTER`，采用受 `#ifndef` 保护的默认值 10，并明确说明该补充；不覆盖外部定义。
+- 时钟中断不跳过被打断指令，不对 EPC 无条件加 2 或加 4。
+- 验证连续多个周期的中断和返回，不能仅验证第一次中断。
 
-## P3：汇编入口、启动栈与 C 初始化
+#### S3：非法指令和断点异常
 
-```text
-[PROMPT]
-任务：分析 code/kern/init/entry.S、init.c 和 tools/kernel.ld，完成练习1并验证最小内核初始化行为。
-操作要求：读取实际文件与反汇编；发现行为不符合规格时，在对应实际文件中修正。
-输出要求：解释 la sp, bootstacktop 与 tail kern_init 的行为、目的和实际展开形式。
+- 输出分别使用 `Illegal instruction at 0x%016lx` 和 `Breakpoint at 0x%016lx` 格式，并包含换行，地址是触发异常的 EPC。
+- 本实验前提是 EPC 指向可读、已映射的内核指令；目标处理 16 位与 32 位指令。
+- 根据指令编码区分长度，16 位指令将 EPC 增加 2，32 位指令增加 4；不能仅按异常种类硬编码统一长度。
+- 读取起始半字，避免为判断压缩指令而进行不必要的跨页 4 字节读取。
+- 检测到不支持的更长编码时明确停止并报告，不能假装属于 32 位指令。
+- 处理完成后由统一返回路径恢复，使程序不重复执行同一条已处理的异常指令。
+- 对未实现的异常只输出现场；不要声称已能恢复任意异常。
 
-[RELY]
-entry.S：kern_entry 中执行 la sp, bootstacktop 和 tail kern_init。
-启动栈在 .data 中分配；PGSIZE=4096，KSTACKPAGE=2，KSTACKSIZE=8192。
-链接入口为 0x80200000；edata 与 end 由链接脚本提供。
-可用函数：void *memset(void *s, char c, size_t n)；int cprintf(const char *fmt, ...)。
+#### S4：验证要求
 
-[GUARANTEE]
-汇编接口：kern_entry、bootstack、bootstacktop。
-C 接口：int kern_init(void) __attribute__((noreturn))。
-不改变入口名称、栈大小或公开接口；必要的辅助函数应为 static。
+1. 断点测试验证进入处理函数、EPC 越过触发指令、寄存器恢复后继续运行。
+2. 非法指令测试验证规定输出、EPC 前移及返回路径。
+3. 时钟测试验证重设事件、持续增加计数、多次 Trap 返回及普通运行的关机条件。
+4. 已知其他中断与未知原因的测试验证提示和现场打印分支。
+5. 运行 `make grade`，保留真实输出；再运行普通 `make qemu`，核对周期输出与自动关机，不修改评分脚本制造通过结果。
 
-[SPECIFICATION]
-## kern_entry
-Pre-Condition：控制权到达内核入口，启动栈区域有效且符合对齐要求。
-Post-Condition：进入 C 初始化前，sp 指向 bootstacktop；执行流转入 kern_init。
-Requirements：解释尾调用不会为入口建立新的返回地址；不得假设伪指令必然只对应一条机器指令。
-
-## kern_init
-Pre-Condition：栈已经建立，edata/end 合法，SBI 输出可用。
-Post-Condition：清零指定的静态未初始化存储区，输出启动文字，持续循环而不返回。
-Case 1：清零区间非空，对整个区间进行清零。
-Case 2：清零区间为空，不写入区间外内存，继续完成输出。
-Requirements：启动栈不得被初始化清零覆盖；以调试器检查 sp 和 bootstacktop 的一致性。
-```
-
-## P4：格式化输出与 SBI 服务链路
-
-```text
-[PROMPT]
-任务：分析 code/kern/libs/stdio.c、kern/driver/console.c、libs/printfmt.c 和 libs/sbi.c 的启动输出链路。
-操作要求：读取各函数实际实现，运行内核核对输出；仅在发现问题时修改对应文件。
-输出要求：说明格式化、逐字符输出、控制台封装和 ecall 的职责，并验证启动消息。
-
-[RELY]
-启动调用：cprintf("%s\n\n", message)。
-调用链：cprintf → vcprintf → vprintfmt → cputch → cons_putc → sbi_console_putchar → sbi_call。
-SBI_CONSOLE_PUTCHAR=1；sbi_call 使用 a7 传服务编号，a0–a2 传参数，通过 ecall 请求固件服务。
-此实验使用支持 legacy SBI 控制台输出的 OpenSBI。
-
-[GUARANTEE]
-int cprintf(const char *fmt, ...)；int vcprintf(const char *fmt, va_list ap)；
-void cons_putc(int c)；void sbi_console_putchar(unsigned char ch)；
-uint64_t sbi_call(uint64_t sbi_type, uint64_t arg0, uint64_t arg1, uint64_t arg2)。
-保留现有接口；不扩展到用户态系统调用或输入驱动实现。
-
-[SPECIFICATION]
-## 格式化输出
-Pre-Condition：格式串及对应实参有效，控制台服务可用。
-Post-Condition：按格式逐字符输出，cprintf 返回格式化输出的字符数量。
-Requirements：变参访问遵循工程的 va_list 定义；字符计数与输出内容一致。
-
-## SBI 控制台输出
-Pre-Condition：固件支持相应服务，内核运行环境允许执行 ecall。
-Post-Condition：字符通过固件控制台出现在 QEMU 终端。
-Requirements：说明 S 模式内核请求 M 模式固件服务与用户态系统调用的区别；核对实际输出，不以代码阅读代替运行验证。
-```
-
-## P5：GDB 跟踪复位到内核的完整流程
-
-```text
-[PROMPT]
-任务：完成 Lab1 练习2，使用 QEMU 与 GDB 跟踪复位 ROM、OpenSBI、kern_entry 和 kern_init。
-操作要求：执行实际调试，完善 code/tools/startup.gdb，记录指令与寄存器观察结果。
-输出要求：回答第一条指令地址、最初几条指令的功能、固件与内核交接地址，以及栈初始化结果。
-
-[RELY]
-make debug 使用 -s -S；GDB 默认连接 localhost:1234。
-符号文件 bin/kernel；kern_entry=0x80200000；栈顶符号 bootstacktop。
-当前 QEMU 4.1.1 的 virt 平台复位地址为 0x1000，OpenSBI 入口为 0x80000000。
-可用命令：info registers、x/i、si、break、continue、p/x。
-
-[GUARANTEE]
-构建接口：make debug、make gdb；GDB 可通过变量 GDB 覆盖。
-命令文件：code/tools/startup.gdb；不新增内核 C 接口。
-
-[SPECIFICATION]
-## 复位与固件
-Pre-Condition：QEMU 在客体 CPU 执行前暂停，GDB 已连接。
-Post-Condition：观察复位 PC，反汇编启动指令，单步确认跳转到固件入口。
-Requirements：以当前平台的实际指令为准，不能用其他版本示例替代实测。
-
-## 内核交接与栈
-Pre-Condition：固件已开始执行，内核入口断点已设置。
-Post-Condition：命中 kern_entry，再到达 kern_init，验证 sp=bootstacktop。
-Requirements：在复位暂停时检查内核地址内容，区分 QEMU 预加载与固件控制权交接；不把未观察到的内存写入描述成调试结论。
-```
-
-## P6：按模板整理实验报告与提交目录
-
-```text
-[PROMPT]
-任务：按报告模板完成 report/report.md，汇总提示词为 report/prompt.md，组织 report/images/ 中的测试截图。
-操作要求：直接编辑实际 Markdown 文件；按练习顺序组织解答，检查目录与图片链接。
-输出要求：报告包含基本信息、实验目的、环境、整体逻辑、内容与实现、测试、总结；Lab0 和 Lab0.5 合并为前置学习。
-
-[RELY]
-分支名称 lab1；顶层目录 code/、report/。
-report/ 仅包含 report.md、prompt.md、images/。
-成员学号、姓名、分工、各成员 AI 工具与模型由成员填写。
-已验证构建、启动文字、复位流程和栈；工程缺少 tools/grade.sh。
-
-[GUARANTEE]
-文档接口：report/report.md、report/prompt.md；截图接口：report/images/。
-本任务不修改内核函数；保留报告模板的主要章节。
-
-[SPECIFICATION]
-## 实验报告
-Pre-Condition：已有指导书、模板和实际验证结果。
-Post-Condition：完整回答两项练习，解释核心函数与模块，列出实验知识点及未涉及的 OS 原理。
-Requirements：提示词按四块结构书写，测试结论与实际结果一致；不编造成员信息或未完成的评分。
-
-## 截图与目录
-Pre-Condition：测试已执行，截图来自对应测试过程。
-Post-Condition：图片存入 images/，Markdown 用相对路径引用；report/ 无多余记录文件。
-Case 1：截图已经取得，检查文件存在、内容对应和链接正确。
-Case 2：截图尚未取得，报告明确待补，不能声称已完成截图交付。
-```
 

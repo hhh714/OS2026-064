@@ -1,2 +1,4 @@
-code/Makefile text eol=lf
-code/tools/function.mk text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
+*.sh text eol=lf
+*.S text eol=lf
