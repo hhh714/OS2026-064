@@ -11,7 +11,7 @@ kern_entry:
     sd a0, 0(t0)
     la t0, boot_dtb
     sd a1, 0(t0)
-
+    
     # t0 := 三级页表的虚拟地址
     lui     t0, %hi(boot_page_table_sv39)
     # t1 := 0xffffffff40000000 即虚实映射偏移量
@@ -25,8 +25,16 @@ kern_entry:
     li      t1, 8 << 60
     # 将刚才计算出的预设三级页表物理页号附加到 satp 中
     or      t0, t0, t1
+    # The boot table maps only the high virtual address. After enabling
+    # paging, the next physical-PC fetch faults and resumes at this virtual
+    # trampoline through stvec (before the normal trap vector is installed).
+    lui     t2, %hi(.Lvirtual_entry)
+    addi    t2, t2, %lo(.Lvirtual_entry)
+    csrw    stvec, t2
     # 将算出的 t0(即新的MODE|页表基址物理页号) 覆盖到 satp 中
     csrw    satp, t0
+    .align 2
+.Lvirtual_entry:
     # 使用 sfence.vma 指令刷新 TLB
     sfence.vma
     # 从此，我们给内核搭建出了一个完美的虚拟内存空间！
@@ -36,13 +44,7 @@ kern_entry:
     lui sp, %hi(bootstacktop)
 
     # 我们在虚拟内存空间中：随意跳转到虚拟地址！
-    # 1. 使用临时寄存器 t1 计算栈顶的精确地址
-    lui t1, %hi(bootstacktop)
-    addi t1, t1, %lo(bootstacktop)
-    # 2. 将精确地址一次性地、安全地传给 sp
-    mv sp, t1
-    # 现在栈指针已经完美设置，可以安全地调用任何C函数了
-    # 然后跳转到 kern_init (不再返回)
+    # 跳转到 kern_init
     lui t0, %hi(kern_init)
     addi t0, t0, %lo(kern_init)
     jr t0
@@ -56,7 +58,8 @@ bootstack:
     .global bootstacktop
 bootstacktop:
 
-    # a page table for Sv39
+.section .data
+    # 由于我们要把这个页表放到一个页里面，因此必须 12 位对齐
     .align PGSHIFT
     .global boot_page_table_sv39
 # 分配 4KiB 内存给预设的三级页表

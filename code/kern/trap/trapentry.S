@@ -1,57 +1,48 @@
 #include <riscv.h>
 
-/* lab3 2414077: sbadaddr is the legacy name of stval (CSR 0x143).
- * Keep SAVE_ALL's source and frame layout unchanged for modern assemblers.
- */
-#ifndef sbadaddr
-#define sbadaddr CSR_SBADADDR
-#endif
-
     .macro SAVE_ALL
+    .align 2
 
     csrw sscratch, sp
 
     addi sp, sp, -36 * REGBYTES
-    # save x registers
-    STORE x0, 0*REGBYTES(sp)
-    STORE x1, 1*REGBYTES(sp)
-    STORE x3, 3*REGBYTES(sp)
-    STORE x4, 4*REGBYTES(sp)
-    STORE x5, 5*REGBYTES(sp)
-    STORE x6, 6*REGBYTES(sp)
-    STORE x7, 7*REGBYTES(sp)
-    STORE x8, 8*REGBYTES(sp)
-    STORE x9, 9*REGBYTES(sp)
-    STORE x10, 10*REGBYTES(sp)
-    STORE x11, 11*REGBYTES(sp)
-    STORE x12, 12*REGBYTES(sp)
-    STORE x13, 13*REGBYTES(sp)
-    STORE x14, 14*REGBYTES(sp)
-    STORE x15, 15*REGBYTES(sp)
-    STORE x16, 16*REGBYTES(sp)
-    STORE x17, 17*REGBYTES(sp)
-    STORE x18, 18*REGBYTES(sp)
-    STORE x19, 19*REGBYTES(sp)
-    STORE x20, 20*REGBYTES(sp)
-    STORE x21, 21*REGBYTES(sp)
-    STORE x22, 22*REGBYTES(sp)
-    STORE x23, 23*REGBYTES(sp)
-    STORE x24, 24*REGBYTES(sp)
-    STORE x25, 25*REGBYTES(sp)
-    STORE x26, 26*REGBYTES(sp)
-    STORE x27, 27*REGBYTES(sp)
-    STORE x28, 28*REGBYTES(sp)
-    STORE x29, 29*REGBYTES(sp)
-    STORE x30, 30*REGBYTES(sp)
-    STORE x31, 31*REGBYTES(sp)
+    # save gprs
+    STORE  x1,1*REGBYTES(sp)
+    STORE  x3,3*REGBYTES(sp)
+    STORE  x4,4*REGBYTES(sp)
+    STORE  x5,5*REGBYTES(sp)
+    STORE  x6,6*REGBYTES(sp)
+    STORE  x7,7*REGBYTES(sp)
+    STORE  x8,8*REGBYTES(sp)
+    STORE  x9,9*REGBYTES(sp)
+    STORE  x10,10*REGBYTES(sp)
+    STORE  x11,11*REGBYTES(sp)
+    STORE  x12,12*REGBYTES(sp)
+    STORE  x13,13*REGBYTES(sp)
+    STORE  x14,14*REGBYTES(sp)
+    STORE  x15,15*REGBYTES(sp)
+    STORE  x16,16*REGBYTES(sp)
+    STORE  x17,17*REGBYTES(sp)
+    STORE  x18,18*REGBYTES(sp)
+    STORE  x19,19*REGBYTES(sp)
+    STORE  x20,20*REGBYTES(sp)
+    STORE  x21,21*REGBYTES(sp)
+    STORE  x22,22*REGBYTES(sp)
+    STORE  x23,23*REGBYTES(sp)
+    STORE  x24,24*REGBYTES(sp)
+    STORE  x25,25*REGBYTES(sp)
+    STORE  x26,26*REGBYTES(sp)
+    STORE  x27,27*REGBYTES(sp)
+    STORE  x28,28*REGBYTES(sp)
+    STORE  x29,29*REGBYTES(sp)
+    STORE  x30,30*REGBYTES(sp)
+    STORE  x31,31*REGBYTES(sp)
 
     # get sr, epc, badvaddr, cause
-    # Set sscratch register to 0, so that if a recursive exception
-    # occurs, the exception vector knows it came from the kernel
-    csrrw s0, sscratch, x0
+    csrr s0, sscratch
     csrr s1, sstatus
     csrr s2, sepc
-    csrr s3, sbadaddr
+    csrr s3, 0x143
     csrr s4, scause
 
     STORE s0, 2*REGBYTES(sp)
@@ -62,13 +53,12 @@
     .endm
 
     .macro RESTORE_ALL
+    # Lab3: restore trap CSRs before restoring the temporary registers.
+    LOAD s0, 32*REGBYTES(sp)
+    LOAD s1, 33*REGBYTES(sp)
+    csrw sstatus, s0
+    csrw sepc, s1
 
-    #lab3 function1 2414077
-    # Restore control state before restoring the temporary registers.
-    LOAD t0, 32*REGBYTES(sp)
-    LOAD t1, 33*REGBYTES(sp)
-    csrw sstatus, t0
-    csrw sepc, t1
     LOAD x1, 1*REGBYTES(sp)
     LOAD x3, 3*REGBYTES(sp)
     LOAD x4, 4*REGBYTES(sp)
@@ -99,23 +89,27 @@
     LOAD x29, 29*REGBYTES(sp)
     LOAD x30, 30*REGBYTES(sp)
     LOAD x31, 31*REGBYTES(sp)
-    # Slot 2 contains the original sp; restore it last.
+    # Restore sp last: all preceding loads use the trapframe as their base.
     LOAD x2, 2*REGBYTES(sp)
-
     .endm
 
     .globl __alltraps
-    .align(2)
 __alltraps:
     SAVE_ALL
 
-    #lab3 function1 2414077
-    mv a0, sp
-    call trap
+    # Lab3: the C handler takes a pointer to the saved trapframe.
+    move a0, sp
+    jal trap
     # sp should be the same as before "jal trap"
 
     .globl __trapret
 __trapret:
     RESTORE_ALL
-    # return from supervisor call
+    # go back from supervisor call
     sret
+ 
+    .globl forkrets
+forkrets:
+    # set stack to this new process's trapframe
+    move sp, a0
+    j __trapret

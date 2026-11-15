@@ -8,10 +8,12 @@
 #include <riscv.h>
 #include <stdio.h>
 #include <trap.h>
+#include <vmm.h>
 
 #define TICK_NUM 100
 
-static void print_ticks() {
+static void print_ticks()
+{
     cprintf("%d ticks\n", TICK_NUM);
 #ifdef DEBUG_GRADE
     cprintf("End of Test.\n");
@@ -21,22 +23,20 @@ static void print_ticks() {
 
 /* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S
  */
-void idt_init(void) {
-
+void idt_init(void)
+{
     extern void __alltraps(void);
-    /* Set sup0 scratch register to 0, indicating to exception vector
-       that we are presently executing in the kernel */
+    /* Set sscratch register to 0, indicating to exception vector that we are
+     * presently executing in the kernel */
     write_csr(sscratch, 0);
     /* Set the exception vector address */
     write_csr(stvec, &__alltraps);
+    /* Allow kernel to access user memory */
+    set_csr(sstatus, SSTATUS_SUM);
 }
 
-/* trap_in_kernel - test if trap happened in kernel */
-bool trap_in_kernel(struct trapframe *tf) {
-    return (tf->status & SSTATUS_SPP) != 0;
-}
-
-void print_trapframe(struct trapframe *tf) {
+void print_trapframe(struct trapframe *tf)
+{
     cprintf("trapframe at %p\n", tf);
     print_regs(&tf->gpr);
     cprintf("  status   0x%08x\n", tf->status);
@@ -45,7 +45,8 @@ void print_trapframe(struct trapframe *tf) {
     cprintf("  cause    0x%08x\n", tf->cause);
 }
 
-void print_regs(struct pushregs *gpr) {
+void print_regs(struct pushregs *gpr)
+{
     cprintf("  zero     0x%08x\n", gpr->zero);
     cprintf("  ra       0x%08x\n", gpr->ra);
     cprintf("  sp       0x%08x\n", gpr->sp);
@@ -80,96 +81,39 @@ void print_regs(struct pushregs *gpr) {
     cprintf("  t6       0x%08x\n", gpr->t6);
 }
 
-//lab3 function2 2414077
-#include <sbi.h>
+extern struct mm_struct *check_mm_struct;
 
-/* Skeleton supplies no threshold: ten printed 100-tick periods by default. */
-#ifndef SHUTDOWN_AFTER
-#define SHUTDOWN_AFTER 10
-#endif
-
-void interrupt_handler(struct trapframe *tf) {
-    uintptr_t cause = tf->cause & ~((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1));
-    static size_t printed_periods;
-    switch (cause) {
+// Lab3: rearm the timer so subsequent interrupts can still arrive.
+static void interrupt_handler(struct trapframe *tf)
+{
+    uintptr_t cause = tf->cause & ~((uintptr_t)1 << (8 * sizeof(uintptr_t) - 1));
+    switch (cause)
+    {
     case IRQ_S_TIMER:
         clock_set_next_event();
-        ticks++;
-        if (ticks % TICK_NUM == 0) {
+        if (++ticks % TICK_NUM == 0)
+        {
             print_ticks();
-            if (++printed_periods >= SHUTDOWN_AFTER) {
-                sbi_shutdown();
-            }
         }
         break;
-    case IRQ_U_SOFT:
-        cprintf("User software interrupt\n");
-        break;
-    case IRQ_S_SOFT:
-        cprintf("Supervisor software interrupt\n");
-        break;
-    case IRQ_M_SOFT:
-        cprintf("Machine software interrupt\n");
-        break;
-    case IRQ_U_TIMER:
-        cprintf("User timer interrupt\n");
-        break;
-    case IRQ_M_TIMER:
-        cprintf("Machine timer interrupt\n");
-        break;
-    case IRQ_U_EXT:
-        cprintf("User external interrupt\n");
-        break;
-    case IRQ_S_EXT:
-        cprintf("Supervisor external interrupt\n");
-        break;
-    case IRQ_M_EXT:
-        cprintf("Machine external interrupt\n");
-        break;
     default:
-        cprintf("Unknown interrupt: cause %lu\n", (unsigned long)cause);
         print_trapframe(tf);
-        break;
+        panic("unexpected interrupt: %lu\n", cause);
     }
 }
 
-void exception_handler(struct trapframe *tf) {
-    switch (tf->cause) {
-    case CAUSE_ILLEGAL_INSTRUCTION:
-    case CAUSE_BREAKPOINT: {
-        if (tf->cause == CAUSE_ILLEGAL_INSTRUCTION) {
-            cprintf("Illegal instruction at 0x%016lx\n", (unsigned long)tf->epc);
-        } else {
-            cprintf("Breakpoint at 0x%016lx\n", (unsigned long)tf->epc);
-        }
-        /* Lab precondition: readable mapped kernel text, 16/32-bit encodings.
-         * A halfword fetch avoids crossing a page for a compressed instruction.
-         */
-        uint16_t first = *(volatile const uint16_t *)(uintptr_t)tf->epc;
-        if ((first & 3) != 3) {
-            tf->epc += 2;
-        } else if ((first & 0x1f) != 0x1f) {
-            tf->epc += 4;
-        } else {
-            panic("unsupported instruction length at 0x%016lx",
-                  (unsigned long)tf->epc);
-        }
+static void exception_handler(struct trapframe *tf)
+{
+    switch (tf->cause)
+    {
+    case CAUSE_BREAKPOINT:
+        cprintf("Breakpoint at 0x%016lx\n", tf->epc);
+        // Both ebreak (4 bytes) and c.ebreak (2 bytes) may be emitted.
+        tf->epc += (*(uint16_t *)tf->epc & 3) == 3 ? 4 : 2;
         break;
-    }
     default:
         print_trapframe(tf);
-        break;
-    }
-}
-
-
-static inline void trap_dispatch(struct trapframe *tf) {
-    if ((intptr_t)tf->cause < 0) {
-        // interrupts
-        interrupt_handler(tf);
-    } else {
-        // exceptions
-        exception_handler(tf);
+        panic("unexpected exception: %lu\n", tf->cause);
     }
 }
 
@@ -179,7 +123,17 @@ static inline void trap_dispatch(struct trapframe *tf) {
  * the code in kern/trap/trapentry.S restores the old CPU state saved in the
  * trapframe and then uses the iret instruction to return from the exception.
  * */
-void trap(struct trapframe *tf) {
+void trap(struct trapframe *tf)
+{
     // dispatch based on what type of trap occurred
-    trap_dispatch(tf);
+    if ((intptr_t)tf->cause < 0)
+    {
+        // interrupts
+        interrupt_handler(tf);
+    }
+    else
+    {
+        // exceptions
+        exception_handler(tf);
+    }
 }
