@@ -87,7 +87,7 @@ size_t nr_free_pages(void)
     return ret;
 }
 
-// Lab2: reserve the kernel and Page array, then register the remaining RAM.
+// Lab2：先保留内核和 Page 数组占用的内存，再把剩余物理页交给分配器。
 static void page_init(void)
 {
     extern char end[];
@@ -206,7 +206,9 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
 {
     pde_t *pdep1 = &pgdir[PDX1(la)];
     pde_t old_pde = *pdep1;
+    // 记录本次新建的中间页表；下一层分配失败时只回收它，不动已有页表。
     struct Page *new_middle = NULL;
+    // Sv39 第一次下降：根页表 L2 → 中间页表 L1。
     if (!(*pdep1 & PTE_V))
     {
         struct Page *page;
@@ -217,11 +219,12 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
         set_page_ref(page, 1);
         uintptr_t pa = page2pa(page);
         memset(KADDR(pa), 0, PGSIZE);
-        // Sv39 non-leaf entries must leave U/A/D clear.
+        // 非叶目录项指向下级页表，U/A/D 保留位必须清零。
         *pdep1 = ptd_create(page2ppn(page));
         new_middle = page;
     }
     pde_t *pdep0 = &((pte_t *)KADDR(PDE_ADDR(*pdep1)))[PDX0(la)];
+    // 第二次下降：中间页表 L1 → 最终页表 L0。
     if (!(*pdep0 & PTE_V))
     {
         struct Page *page;
@@ -229,9 +232,9 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
         {
             if (new_middle != NULL)
             {
-                // Roll back only the table allocated by this call.
+                // 恢复原目录项，并归还本次创建的空页表，避免失败时泄漏。
                 *pdep1 = old_pde;
-                // A non-leaf change needs a full local translation fence.
+                // 非叶项被撤销，先同步本 hart 的地址翻译，再释放物理页。
                 asm volatile("sfence.vma" ::: "memory");
                 set_page_ref(new_middle, 0);
                 free_page(new_middle);
@@ -261,7 +264,7 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
     return NULL;
 }
 
-// LAB4 function1: maintain mappings, page references and the TLB together.
+// LAB4 功能一：页表项、物理页引用计数和 TLB 必须同步维护。
 static void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
 {
     if (*ptep & PTE_V)
@@ -269,6 +272,7 @@ static void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
         struct Page *page = pte2page(*ptep);
         if (page_ref_dec(page) == 0)
         {
+            // 最后一个映射被撤销后，才允许回收物理页。
             free_page(page);
         }
         *ptep = 0;
@@ -278,6 +282,7 @@ static void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
 
 void page_remove(pde_t *pgdir, uintptr_t la)
 {
+    // 删除只查找已有页表，create=0，不能为了删除而分配新页表。
     pte_t *ptep = get_pte(pgdir, la, 0);
     if (ptep != NULL)
     {
@@ -293,16 +298,18 @@ int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
         return -E_NO_MEM;
     }
 
-    // Increment first: remapping the same page must never free it.
+    // 先增加引用：同一物理页重新映射时，不能因引用暂时归零而被误释放。
     page_ref_inc(page);
     if (*ptep & PTE_V)
     {
         if (pte2page(*ptep) == page)
         {
+            // 仍映射同一页，仅更新权限，引用总数保持不变。
             page_ref_dec(page);
         }
         else
         {
+            // 换成另一物理页，先撤销旧页的引用和旧映射。
             page_remove_pte(pgdir, la, ptep);
         }
     }

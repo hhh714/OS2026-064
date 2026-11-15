@@ -53,7 +53,7 @@
     .endm
 
     .macro RESTORE_ALL
-    # Lab3: restore trap CSRs before restoring the temporary registers.
+    # Lab3：先恢复 sstatus、sepc，再恢复通用寄存器，最后交给 sret。
     LOAD s0, 32*REGBYTES(sp)
     LOAD s1, 33*REGBYTES(sp)
     csrw sstatus, s0
@@ -89,7 +89,7 @@
     LOAD x29, 29*REGBYTES(sp)
     LOAD x30, 30*REGBYTES(sp)
     LOAD x31, 31*REGBYTES(sp)
-    # Restore sp last: all preceding loads use the trapframe as their base.
+    # sp 最后恢复：前面的 LOAD 都还需要它指向 trapframe。
     LOAD x2, 2*REGBYTES(sp)
     .endm
 
@@ -97,7 +97,7 @@
 __alltraps:
     SAVE_ALL
 
-    # Lab3: the C handler takes a pointer to the saved trapframe.
+    # 将 trapframe 地址作为第一个参数传给 C 语言的 trap 处理函数。
     move a0, sp
     jal trap
     # sp should be the same as before "jal trap"

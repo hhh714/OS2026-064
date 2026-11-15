@@ -54,7 +54,7 @@ def main():
             )
             output = result.stdout
         except subprocess.TimeoutExpired as error:
-            # The supplied do_exit enters the monitor instead of shutting down.
+            # 兼容停留在监控器的模板版本；下方仍须检查所有测试标记。
             output = error.stdout or b""
         text = output.decode("utf-8", errors="replace")
         expected = [

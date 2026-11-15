@@ -218,12 +218,13 @@ init_main(void *arg)
     return 0;
 }
 
-// LAB4 function2: allocate a PCB, then build a runnable kernel thread.
+// LAB4 功能二：先准备 PCB、内核栈和初始现场，最后登记并唤醒线程。
 static struct proc_struct *alloc_proc(void)
 {
     struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
     if (proc != NULL)
     {
+        // 清零 context、tf、parent、mm 等字段，避免使用未初始化的现场。
         memset(proc, 0, sizeof(struct proc_struct));
         proc->state = PROC_UNINIT;
         proc->pid = -1;
@@ -236,7 +237,7 @@ static struct proc_struct *alloc_proc(void)
 
 static int copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 {
-    // Lab4 has only kernel threads, which share the boot page table.
+    // 本实验只有内核线程，共用启动页表；用户地址空间复制留到后续实验。
     assert(current->mm == NULL);
     return 0;
 }
@@ -244,11 +245,13 @@ static int copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 static void copy_thread(struct proc_struct *proc, uintptr_t esp,
                         struct trapframe *tf)
 {
+    // 将 trapframe 放在新线程内核栈顶，栈向低地址增长。
     proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE -
                                    sizeof(struct trapframe));
     *proc->tf = *tf;
-    proc->tf->gpr.a0 = 0; // The child's fork return value.
+    proc->tf->gpr.a0 = 0; // 子线程视角下 fork 的返回值为 0。
     proc->tf->gpr.sp = esp != 0 ? esp : (uintptr_t)proc->tf;
+    // switch_to 的 ret 首次进入 forkret，再通过 sret 恢复 trapframe。
     proc->context.ra = (uintptr_t)forkret;
     proc->context.sp = (uintptr_t)proc->tf;
 }
@@ -267,6 +270,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         return ret;
     }
     proc->parent = current;
+    // 资源准备成功后才加入全局链表，失败时按相反顺序释放。
     if (setup_kstack(proc) != 0)
     {
         goto bad_fork_cleanup_proc;
@@ -277,6 +281,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     }
     copy_thread(proc, stack, tf);
 
+    // PID 分配、哈希/链表登记和状态切换应作为一个完整的临界区。
     bool intr_flag;
     local_intr_save(intr_flag);
     {
@@ -300,9 +305,10 @@ int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
 {
     struct trapframe tf;
     memset(&tf, 0, sizeof(struct trapframe));
-    // kernel_thread_entry moves s1 into a0 and calls the function in s0.
+    // 入口汇编把 s1 放入 a0 作为参数，再调用 s0 保存的线程函数。
     tf.gpr.s0 = (uintptr_t)fn;
     tf.gpr.s1 = (uintptr_t)arg;
+    // SPP=1 表示返回内核态；SPIE=1 使 sret 后开中断，恢复现场时 SIE=0。
     tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
     tf.epc = (uintptr_t)kernel_thread_entry;
     return do_fork(clone_flags | CLONE_VM, 0, &tf);
@@ -321,6 +327,7 @@ void proc_init(void)
     {
         panic("cannot allocate idleproc.\n");
     }
+    // idle 直接复用当前启动执行流和 bootstack，不再分配一个新栈。
     idleproc->pid = 0;
     idleproc->state = PROC_RUNNABLE;
     idleproc->kstack = (uintptr_t)bootstack;
@@ -329,6 +336,7 @@ void proc_init(void)
     nr_process++;
     current = idleproc;
 
+    // init 是通过正常线程创建流程产生的第一个内核线程。
     int pid = kernel_thread(init_main, "Hello world!!", 0);
     if (pid <= 0)
     {
@@ -339,7 +347,7 @@ void proc_init(void)
     set_proc_name(initproc, "init");
 }
 
-// LAB4 function3: switch address space and saved CPU context atomically.
+// LAB4 功能三：关中断后依次切换 current、页表和 CPU 上下文。
 void proc_run(struct proc_struct *proc)
 {
     if (proc != current)
@@ -349,10 +357,12 @@ void proc_run(struct proc_struct *proc)
         {
             struct proc_struct *prev = current;
             current = proc;
+            // RV64 satp 高四位的 8 表示 Sv39，低位保存根页表物理页号。
             write_csr(satp, ((uintptr_t)8 << 60) | (proc->pgdir >> PGSHIFT));
             flush_tlb();
             switch_to(&prev->context, &proc->context);
         }
+        // 旧线程将来被切回时，从这里继续，恢复它进入临界区前的中断状态。
         local_intr_restore(intr_flag);
     }
 }
@@ -361,6 +371,7 @@ void cpu_idle(void)
 {
     while (1)
     {
+        // idle 只在有重调度请求时调用调度器。
         if (current->need_resched)
         {
             schedule();

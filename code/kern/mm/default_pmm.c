@@ -3,7 +3,7 @@
 #include <default_pmm.h>
 #include <stdio.h>
 
-// Lab2: keep free blocks in address order, but allocate the smallest fit.
+// Lab2：空闲块按地址排序，分配时选择能满足请求的最小块（最佳适应）。
 static free_area_t free_area;
 #define free_list (free_area.free_list)
 #define nr_free (free_area.nr_free)
@@ -56,6 +56,7 @@ static struct Page *default_alloc_pages(size_t n) {
         list_entry_t *prev = list_prev(&best->page_link);
         list_del(&best->page_link);
         if (best->property > n) {
+            // 只取块头的 n 页，将剩余部分作为新的空闲块挂回原位置。
             struct Page *rest = best + n;
             rest->property = best->property - n;
             SetPageProperty(rest);
@@ -86,7 +87,7 @@ static void default_free_pages(struct Page *base, size_t n) {
     }
     list_add_before(le, &base->page_link);
 
-    // Merge with adjacent blocks on both sides to recover contiguous space.
+    // 按地址相邻关系向前、向后合并，恢复连续空闲空间。
     le = list_prev(&base->page_link);
     if (le != &free_list) {
         struct Page *prev = le2page(le, page_link);

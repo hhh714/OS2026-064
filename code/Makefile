@@ -30,7 +30,8 @@ HOSTCFLAGS	:= -Wall -O2
 GDB		:= $(GCCPREFIX)gdb
 
 CC		:= $(GCCPREFIX)gcc
-CFLAGS  := -mcmodel=medany -O2 -std=gnu99 -Wno-unused
+OPTFLAGS ?= -O2
+CFLAGS  := -mcmodel=medany $(OPTFLAGS) -std=gnu99 -Wno-unused
 CFLAGS	+= -fno-builtin -Wall -nostdinc $(DEFS)
 CFLAGS	+= -fno-stack-protector -ffunction-sections -fdata-sections
 CFLAGS	+= -g
@@ -53,8 +54,8 @@ SH		:= sh
 TR		:= tr
 TOUCH	:= touch -c
 
-OBJDIR	:= obj
-BINDIR	:= bin
+OBJDIR	?= obj
+BINDIR	?= bin
 
 ALLOBJS	:=
 ALLDEPS	:=
@@ -175,19 +176,30 @@ qemu: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 		-bios default \
 		-kernel $(UCOREIMG)
 
-debug: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
+# 调试版单独保存，避免把普通构建的 -O2 对象误用于逐行演示。
+DEBUG_BUILD = OBJDIR=obj/debug BINDIR=bin/debug OPTFLAGS='-O0 -g3 -fno-omit-frame-pointer'
+
+.PHONY: debug debug-build qemu-debug gdb check-debug
+debug-build:
+	$(V)$(MAKE) $(MAKEOPTS) $(DEBUG_BUILD) TARGETS
+
+debug:
+	$(V)$(MAKE) $(MAKEOPTS) $(DEBUG_BUILD) qemu-debug
+
+qemu-debug: $(UCOREIMG)
+	@echo 'QEMU debug: waiting for GDB on 127.0.0.1:1234'
 	$(V)$(QEMU) \
 		-machine virt \
 		-nographic \
 		-bios default \
 		-kernel $(UCOREIMG) \
-		-s -S
+		-gdb tcp:127.0.0.1:1234 -S
 
-gdb:
-	riscv64-unknown-elf-gdb \
-    -ex 'file bin/kernel' \
-    -ex 'set arch riscv:rv64' \
-    -ex 'target remote localhost:1234'
+gdb: debug-build
+	$(V)$(GDB) -q -x tools/gdbinit $(GDBFLAGS)
+
+check-debug:
+	$(V)python3 tools/check_debug.py
 
 spike: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 	$(V)$(SPIKE) $(UCOREIMG)

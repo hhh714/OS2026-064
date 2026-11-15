@@ -2,7 +2,7 @@
 
 本实验基于 uCore / RISC-V RV64，完成页映射管理、内核线程创建、调度和上下文切换。
 
-实验要求核对及两道思考题的解答见 [Challenge 解答](../report/challenge.md)。
+实验要求核对及两道思考题的解答见 [Challenge 解答](../report/challenge.md)。现场命令、预期输出和调试讲解见 [演示手册](../report/demo.md)。
 
 ## 实现内容
 
@@ -38,7 +38,9 @@ make grade
 make grade GDB=gdb-multiarch
 ```
 
-调试时在一个终端执行 `make debug`，另一个终端执行 `make gdb`。退出 QEMU 控制台可按 `Ctrl-a` 后再按 `x`。
+调试时在一个终端执行 `make debug`，另一个终端执行 `make gdb`（也支持 `GDB=gdb-multiarch`）。调试版使用 `-O0`，产物单独放在 `obj/debug/` 和 `bin/debug/`。自动停在 `kern_init` 后，依次执行 `demo-pages`、`demo-procs`、`demo-switch`、`demo-entry`，观察页表、线程结构、寄存器切换和线程入口。
+
+`make check-debug` 可以自动执行并检查上述 GDB 流程。手动演示结束时在 GDB 执行 `detach`、`quit`；若 QEMU 仍在运行，可到其控制台按 `Ctrl-a` 后按 `x`。调试期间不要运行会清理产物的 `make clean` 或 `make grade`。
 
 ## 验证结果
 
@@ -51,10 +53,12 @@ check Schedule:        OK
 Total Score: 30/30
 ```
 
-普通启动通过物理页、页表和 VMA 自检，随后 `init` 输出 `Hello world!!`。线程函数返回后触发 `process exit!!`，这是模板中 `do_exit` 的预留行为，不属于本阶段需要实现的完整进程退出机制。
+普通启动通过物理页、页表和 VMA 自检，随后 `init` 输出 `Hello world!!`。线程函数返回后触发 `process exit!!`，这是模板中 `do_exit` 的预留行为。监控器打印欢迎语后调用 `sbi_shutdown()`，QEMU 自动退出；这不属于本阶段需要实现的完整进程退出机制。
 
 运行兼容修正包括：使用 QEMU `-kernel` 指定启动镜像，在开启分页时通过高地址跳板继续执行，以及清除 Sv39 非叶页表项中不应设置的 `U` 位。页表自检同步检查两级目录项的合法标志；评分测试和物理分配器原有自检内容保留。
 
 额外的物理页耗尽回归测试可运行 `python3 tools/check_pte_oom.py`。它验证页表分配失败时的资源回滚及已有映射保护，并再次运行三项基础测试；原有评分测试内容保持不变。
+
+GDB 自动检查覆盖四个阶段：可读写映射与引用计数、idle/init 的页表与内核栈、关闭中断后的 Sv39 上下文切换、首次线程入口及返回值。`make check-debug` 的四项状态检查均通过。
 
 框架中的 `kmalloc.c` 整数转指针调用和评分线程入口返回类型会产生编译警告，现有评分仍通过。尚未进行用户进程测试，本阶段也不实现用户进程。
