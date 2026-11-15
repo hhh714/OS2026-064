@@ -5,24 +5,16 @@
 #include <defs.h>
 #endif /* !__ASSEMBLER__ */
 
-// A linear address 'la' has a three-part structure as follows:
+// Sv39: three 9-bit page-table indices and a 12-bit page offset.
 //
-// +--------10------+-------10-------+---------12----------+
-// | Page Directory |   Page Table   | Offset within Page  |
-// |      Index     |     Index      |                     |
-// +----------------+----------------+---------------------+
-//  \--- PDX(la) --/ \--- PTX(la) --/ \---- PGOFF(la) ----/
-//  \----------- PPN(la) -----------/
+// +--- VPN[2] ---+--- VPN[1] ---+--- VPN[0] ---+--- offset ---+
+// |    38:30    |    29:21    |    20:12    |    11:0     |
+// +-------------+-------------+-------------+-------------+
+//    PDX1(la)      PDX0(la)       PTX(la)       PGOFF(la)
 //
-// The PDX, PTX, PGOFF, and PPN macros decompose linear addresses as shown.
-// To construct a linear address la from PDX(la), PTX(la), and PGOFF(la),
-// use PGADDR(PDX(la), PTX(la), PGOFF(la)).
-
-// RISC-V uses 32-bit virtual address to access 34-bit physical address!
-// Sv32 page table entry:
-// +---------12----------+--------10-------+---2----+-------8-------+
-// |       PPN[1]        |      PPN[0]     |Reserved|D|A|G|U|X|W|R|V|
-// +---------12----------+-----------------+--------+---------------+
+// Bits 63:39 of a canonical virtual address copy bit 38. Each page-table
+// page contains 512 64-bit entries. PTE bits 53:10 hold the physical page
+// number; bits 9:0 hold software and permission/status flags.
 
 // page directory index
 #define PDX1(la) ((((uintptr_t)(la)) >> PDX1SHIFT) & 0x1FF)

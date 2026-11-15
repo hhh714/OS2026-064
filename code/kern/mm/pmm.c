@@ -205,6 +205,8 @@ void pmm_init(void)
 pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
 {
     pde_t *pdep1 = &pgdir[PDX1(la)];
+    pde_t old_pde = *pdep1;
+    struct Page *new_middle = NULL;
     if (!(*pdep1 & PTE_V))
     {
         struct Page *page;
@@ -217,6 +219,7 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
         memset(KADDR(pa), 0, PGSIZE);
         // Sv39 non-leaf entries must leave U/A/D clear.
         *pdep1 = ptd_create(page2ppn(page));
+        new_middle = page;
     }
     pde_t *pdep0 = &((pte_t *)KADDR(PDE_ADDR(*pdep1)))[PDX0(la)];
     if (!(*pdep0 & PTE_V))
@@ -224,6 +227,15 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
         struct Page *page;
         if (!create || (page = alloc_page()) == NULL)
         {
+            if (new_middle != NULL)
+            {
+                // Roll back only the table allocated by this call.
+                *pdep1 = old_pde;
+                // A non-leaf change needs a full local translation fence.
+                asm volatile("sfence.vma" ::: "memory");
+                set_page_ref(new_middle, 0);
+                free_page(new_middle);
+            }
             return NULL;
         }
         set_page_ref(page, 1);
