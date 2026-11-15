@@ -2,7 +2,7 @@
 
 本实验基于 uCore / RISC-V RV64，完成页映射管理、内核线程创建、调度和上下文切换。
 
-实验要求核对及两道思考题的解答见 [Challenge 解答](../report/challenge.md)。现场命令、预期输出和调试讲解见 [演示手册](../report/demo.md)。
+实验要求核对及两道思考题的解答见 [Challenge 解答](../report/challenge.md)。
 
 ## 实现内容
 
@@ -38,9 +38,9 @@ make grade
 make grade GDB=gdb-multiarch
 ```
 
-调试时在一个终端执行 `make debug`，另一个终端执行 `make gdb`（也支持 `GDB=gdb-multiarch`）。调试版使用 `-O0`，产物单独放在 `obj/debug/` 和 `bin/debug/`。自动停在 `kern_init` 后，依次执行 `demo-pages`、`demo-procs`、`demo-switch`、`demo-entry`，观察页表、线程结构、寄存器切换和线程入口。
+调试时在一个终端执行 `make debug`，另一个终端执行 `make gdb`（也支持 `GDB=gdb-multiarch`）。调试版使用 `-O0`，产物单独放在 `obj/debug/` 和 `bin/debug/`，连接后自动停在 `kern_init`。
 
-`make check-debug` 可以自动执行并检查上述 GDB 流程。手动演示结束时在 GDB 执行 `detach`、`quit`；若 QEMU 仍在运行，可到其控制台按 `Ctrl-a` 后按 `x`。调试期间不要运行会清理产物的 `make clean` 或 `make grade`。
+`make check-debug` 可以自动执行 GDB 状态检查。调试结束时在 GDB 执行 `detach`、`quit`；若 QEMU 仍在运行，可到其控制台按 `Ctrl-a` 后按 `x`。调试期间不要运行会清理产物的 `make clean` 或 `make grade`。
 
 ## 验证结果
 
